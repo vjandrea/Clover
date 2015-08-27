@@ -19,6 +19,7 @@ package org.floens.chan.ui.controller;
 
 import android.content.Context;
 import android.content.res.Configuration;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -159,6 +160,13 @@ public class SplitNavigationController extends NavigationController implements A
     }
 
     @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        return (rightController != null && rightController.dispatchKeyEvent(event)) ||
+                (leftController != null && leftController.dispatchKeyEvent(event)) ||
+                super.dispatchKeyEvent(event);
+    }
+
+    @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
 
@@ -167,7 +175,7 @@ public class SplitNavigationController extends NavigationController implements A
 
     @Override
     public boolean onMeasured(View view) {
-        int width = Math.max(dp(320), (int) (view.getWidth() * 0.35));
+        int width = Math.max(dp(300), (int) (view.getWidth() * 0.35));
         if (leftControllerView.getWidth() != width) {
             leftControllerView.getLayoutParams().width = width;
             leftControllerView.requestLayout();

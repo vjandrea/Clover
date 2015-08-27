@@ -17,7 +17,6 @@
  */
 package org.floens.chan.ui.activity;
 
-import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -26,7 +25,10 @@ import android.nfc.NdefMessage;
 import android.nfc.NfcAdapter;
 import android.nfc.NfcEvent;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.ViewGroup;
 
@@ -46,6 +48,7 @@ import org.floens.chan.ui.controller.SplitNavigationController;
 import org.floens.chan.ui.controller.StyledToolbarNavigationController;
 import org.floens.chan.ui.controller.ViewThreadController;
 import org.floens.chan.ui.helper.ImagePickDelegate;
+import org.floens.chan.ui.helper.PreviousVersionHandler;
 import org.floens.chan.ui.state.ChanState;
 import org.floens.chan.ui.theme.ThemeHelper;
 import org.floens.chan.utils.AndroidUtils;
@@ -64,7 +67,7 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
 
     private final BoardManager boardManager;
     private DrawerController drawerController;
-    private NavigationController threadNavigationController;
+    private NavigationController mainNavigationController;
     private BrowseController browseController;
 
     private ImagePickDelegate imagePickDelegate;
@@ -97,14 +100,14 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
             drawerController.setChildController(splitNavigationController);
 
             splitNavigationController.setLeftController(toolbarNavigationController);
-            threadNavigationController = toolbarNavigationController;
+            mainNavigationController = toolbarNavigationController;
         } else {
             drawerController.setChildController(toolbarNavigationController);
-            threadNavigationController = toolbarNavigationController;
+            mainNavigationController = toolbarNavigationController;
         }
 
         browseController = new BrowseController(this);
-        toolbarNavigationController.pushController(browseController, false);
+        mainNavigationController.pushController(browseController, false);
 
         setContentView(drawerController.view);
         addController(drawerController);
@@ -162,6 +165,9 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
         if (loadDefault) {
             browseController.loadBoard(boardManager.getSavedBoards().get(0));
         }
+
+        PreviousVersionHandler previousVersionHandler = new PreviousVersionHandler();
+        previousVersionHandler.run(this);
     }
 
     public void restart() {
@@ -177,7 +183,7 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
         // Handle WatchNotifier clicks
         if (intent.getExtras() != null) {
             int pinId = intent.getExtras().getInt("pin_id", -2);
-            if (pinId != -2 && threadNavigationController.getTop() instanceof BrowseController) {
+            if (pinId != -2 && mainNavigationController.getTop() instanceof BrowseController) {
                 if (pinId == -1) {
                     drawerController.onMenuClicked();
                 } else {
@@ -191,6 +197,16 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
     }
 
     @Override
+    public boolean dispatchKeyEvent(@NonNull KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_MENU && event.getAction() == KeyEvent.ACTION_DOWN) {
+            drawerController.onMenuClicked();
+            return true;
+        }
+
+        return stackTop().dispatchKeyEvent(event) || super.dispatchKeyEvent(event);
+    }
+
+    @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
 
@@ -199,11 +215,26 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
             Logger.w(TAG, "Can not save instance state, the board loadable is null");
         } else {
             Loadable thread = null;
-            List<Controller> controllers = threadNavigationController.getControllerList();
-            for (Controller controller : controllers) {
-                if (controller instanceof ViewThreadController) {
-                    thread = ((ViewThreadController) controller).getLoadable();
-                    break;
+
+            if (drawerController.getChildController() instanceof SplitNavigationController) {
+                SplitNavigationController splitNavigationController = (SplitNavigationController) drawerController.getChildController();
+                if (splitNavigationController.rightController instanceof NavigationController) {
+                    NavigationController rightNavigationController = (NavigationController) splitNavigationController.rightController;
+                    for (Controller controller : rightNavigationController.getControllerList()) {
+                        if (controller instanceof ViewThreadController) {
+                            thread = ((ViewThreadController) controller).getLoadable();
+                            break;
+                        }
+                    }
+
+                }
+            } else {
+                List<Controller> controllers = mainNavigationController.getControllerList();
+                for (Controller controller : controllers) {
+                    if (controller instanceof ViewThreadController) {
+                        thread = ((ViewThreadController) controller).getLoadable();
+                        break;
+                    }
                 }
             }
 
@@ -218,7 +249,7 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
 
     @Override
     public NdefMessage createNdefMessage(NfcEvent event) {
-        Controller controller = threadNavigationController.getTop();
+        Controller controller = mainNavigationController.getTop();
         if (controller instanceof NfcAdapter.CreateNdefMessageCallback) {
             return ((NfcAdapter.CreateNdefMessageCallback) controller).createNdefMessage(event);
         } else {

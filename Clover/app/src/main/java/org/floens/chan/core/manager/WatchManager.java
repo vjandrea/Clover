@@ -142,12 +142,6 @@ public class WatchManager {
         return true;
     }
 
-    public boolean addPin(Loadable loadable) {
-        Pin pin = new Pin();
-        pin.loadable = loadable;
-        return addPin(pin);
-    }
-
     public boolean addPin(Post opPost) {
         Pin pin = new Pin();
         pin.loadable = new Loadable(opPost.board, opPost.no);
@@ -173,6 +167,8 @@ public class WatchManager {
         pins.remove(pin);
         pin.destroyWatcher();
         Chan.getDatabaseManager().removePin(pin);
+        // Update the new orders
+        updateDatabase();
 
         onPinsChanged();
 

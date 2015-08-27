@@ -269,7 +269,7 @@ public class ChanReaderRequest extends JsonReaderRequest<ChanReaderRequest.ChanR
                     post.imageHeight = reader.nextInt();
                     break;
                 case "fsize":
-                    post.fileSize = reader.nextInt();
+                    post.fileSize = reader.nextLong();
                     break;
                 case "sub":
                     post.subject = reader.nextString();
@@ -367,14 +367,10 @@ public class ChanReaderRequest extends JsonReaderRequest<ChanReaderRequest.ChanR
                         post.filterHighlightedColor = filter.color;
                         break;
                     case HIDE:
-                        if (!loadable.isThreadMode()) {
-                            post.filterStub = true;
-                        }
+                        post.filterStub = true;
                         break;
                     case REMOVE:
-                        if (!loadable.isThreadMode()) {
-                            post.filterRemove = true;
-                        }
+                        post.filterRemove = true;
                         break;
                 }
             }

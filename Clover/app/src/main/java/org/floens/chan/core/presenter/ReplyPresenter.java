@@ -28,6 +28,7 @@ import org.floens.chan.core.http.ReplyManager;
 import org.floens.chan.core.manager.BoardManager;
 import org.floens.chan.core.manager.WatchManager;
 import org.floens.chan.core.model.Board;
+import org.floens.chan.core.model.ChanThread;
 import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.Post;
 import org.floens.chan.core.model.Reply;
@@ -37,6 +38,7 @@ import org.floens.chan.ui.helper.ImagePickDelegate;
 import org.floens.chan.ui.layout.CaptchaLayout;
 
 import java.io.File;
+import java.nio.charset.Charset;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -52,6 +54,7 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
     }
 
     private static final Pattern QUOTE_PATTERN = Pattern.compile(">>\\d+");
+    private static final Charset UTF_8 = Charset.forName("UTF-8");
 
     private ReplyPresenterCallback callback;
 
@@ -112,6 +115,8 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
     }
 
     public void unbindLoadable() {
+        draft.file = null;
+        draft.fileName = "";
         callback.loadViewsIntoDraft(draft);
         replyManager.putReply(loadable, draft);
 
@@ -194,7 +199,10 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
     public void onHttpSuccess(ReplyHttpCall replyCall) {
         if (replyCall.posted) {
             if (ChanSettings.postPinThread.get() && loadable.isThreadMode()) {
-                watchManager.addPin(loadable);
+                ChanThread thread = callback.getThread();
+                if (thread != null) {
+                    watchManager.addPin(loadable, thread.op);
+                }
             }
 
             databaseManager.saveReply(new SavedReply(loadable.board, replyCall.postNo, replyCall.password));
@@ -240,7 +248,8 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
         makeSubmitCall();
     }
 
-    public void onCommentTextChanged(int length) {
+    public void onCommentTextChanged(CharSequence text) {
+        int length = text.toString().getBytes(UTF_8).length;
         callback.updateCommentCount(length, board.maxCommentChars, length > board.maxCommentChars);
     }
 
@@ -427,5 +436,7 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
         void showThread(Loadable loadable);
 
         ImagePickDelegate getImagePickDelegate();
+
+        ChanThread getThread();
     }
 }

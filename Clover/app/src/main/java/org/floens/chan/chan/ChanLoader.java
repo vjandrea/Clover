@@ -51,11 +51,9 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     private final RequestQueue volleyRequestQueue;
     private ChanThread thread;
 
-    private boolean destroyed = false;
-    private boolean autoReload = false;
     private ChanReaderRequest request;
 
-    private int currentTimeout;
+    private int currentTimeout = -1;
     private int lastPostCount;
     private long lastLoadTime;
     private ScheduledFuture<?> pendingFuture;
@@ -73,25 +71,25 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     /**
      * Add a LoaderListener
      *
-     * @param l the listener to add
+     * @param listener the listener to add
      */
-    public void addListener(ChanLoaderCallback l) {
-        listeners.add(l);
+    public void addListener(ChanLoaderCallback listener) {
+        listeners.add(listener);
     }
 
     /**
      * Remove a LoaderListener
      *
-     * @param l the listener to remove
+     * @param listener the listener to remove
      * @return true if there are no more listeners, false otherwise
      */
-    public boolean removeListener(ChanLoaderCallback l) {
-        listeners.remove(l);
-        if (listeners.size() == 0) {
+    public boolean removeListener(ChanLoaderCallback listener) {
+        listeners.remove(listener);
+        if (listeners.isEmpty()) {
             clearTimer();
-            destroyed = true;
             if (request != null) {
                 request.cancel();
+                request = null;
             }
             return true;
         } else {
@@ -100,17 +98,36 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     }
 
     /**
-     * Enable this if requestMoreData should me called automatically when the
-     * timer hits 0
+     * Request data for the first time.
      */
-    public void setAutoLoadMore(boolean autoReload) {
-        if (this.autoReload != autoReload) {
-            Logger.d(TAG, "Setting autoreload to " + autoReload);
-            this.autoReload = autoReload;
+    public void requestData() {
+        clearTimer();
 
-            if (!autoReload) {
-                clearTimer();
-            }
+        if (request != null) {
+            request.cancel();
+            // request = null;
+        }
+
+        if (loadable.isCatalogMode()) {
+            loadable.no = 0;
+            loadable.listViewIndex = 0;
+            loadable.listViewTop = 0;
+        }
+
+        currentTimeout = -1;
+        thread = null;
+
+        request = getData();
+    }
+
+    /**
+     * Request more data
+     */
+    public void requestMoreData() {
+        clearPendingRunnable();
+
+        if (loadable.isThreadMode() && request == null) {
+            request = getData();
         }
     }
 
@@ -125,45 +142,26 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
         }
     }
 
-    /**
-     * Request data for the first time.
-     */
-    public void requestData() {
-        clearTimer();
-
-        if (request != null) {
-            request.cancel();
+    public void quickLoad() {
+        if (thread == null) {
+            throw new IllegalStateException("Cannot quick load without already loaded thread");
         }
 
-        if (loadable.isCatalogMode()) {
-            loadable.no = 0;
-            loadable.listViewIndex = 0;
-            loadable.listViewTop = 0;
+        for (ChanLoaderCallback l : listeners) {
+            l.onChanLoaderData(thread);
         }
 
-        currentTimeout = 0;
-        thread = null;
-
-        request = getData();
-    }
-
-    /**
-     * Request more data
-     */
-    public void requestMoreData() {
-        clearTimer();
-
-        if (loadable.isThreadMode() && request == null) {
-            request = getData();
-        }
+        requestMoreData();
     }
 
     /**
      * Request more data and reset the watch timer.
      */
     public void requestMoreDataAndResetTimer() {
-        currentTimeout = 0;
-        requestMoreData();
+        if (request == null) {
+            clearTimer();
+            requestMoreData();
+        }
     }
 
     public boolean isLoading() {
@@ -181,7 +179,7 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
         if (request != null) {
             return 0L;
         } else {
-            long waitTime = watchTimeouts[currentTimeout] * 1000L;
+            long waitTime = watchTimeouts[Math.max(0, currentTimeout)] * 1000L;
             return lastLoadTime + waitTime - Time.get();
         }
     }
@@ -193,8 +191,6 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     @Override
     public void onResponse(ChanReaderRequest.ChanReaderResponse response) {
         request = null;
-        if (destroyed)
-            return;
 
         if (response.posts.size() == 0) {
             onErrorResponse(new VolleyError("Post size is 0"));
@@ -220,10 +216,6 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
 
         lastLoadTime = Time.get();
 
-        if (loadable.isThreadMode()) {
-            setTimer(response.posts.size());
-        }
-
         for (ChanLoaderCallback l : listeners) {
             l.onChanLoaderData(thread);
         }
@@ -232,8 +224,6 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     @Override
     public void onErrorResponse(VolleyError error) {
         request = null;
-        if (destroyed)
-            return;
 
         Logger.i(TAG, "Loading error", error);
 
@@ -269,46 +259,43 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
         }
     }
 
-    private void setTimer(int postCount) {
-        clearTimer();
+    public void setTimer() {
+        clearPendingRunnable();
 
+        int postCount = thread == null ? 0 : thread.posts.size();
         if (postCount > lastPostCount) {
             lastPostCount = postCount;
             currentTimeout = 0;
         } else {
             currentTimeout++;
-            if (currentTimeout >= watchTimeouts.length) {
-                currentTimeout = watchTimeouts.length - 1;
+            currentTimeout = Math.min(currentTimeout, watchTimeouts.length - 1);
+        }
+
+        int watchTimeout = watchTimeouts[currentTimeout];
+        Logger.d(TAG, "Scheduled reload in " + watchTimeout + "s");
+
+        pendingFuture = executor.schedule(new Runnable() {
+            @Override
+            public void run() {
+                AndroidUtils.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        pendingFuture = null;
+                        requestMoreData();
+                    }
+                });
             }
-        }
-
-        if (!autoReload && currentTimeout < 4) {
-            currentTimeout = 4; // At least 60 seconds in the background
-        }
-
-        if (autoReload) {
-            Runnable pendingRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    AndroidUtils.runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            pendingFuture = null;
-                            // Always reload, it's always time to reload when the timer fires
-                            requestMoreData();
-                        }
-                    });
-                }
-            };
-
-            Logger.d(TAG, "Scheduled reload in " + watchTimeouts[currentTimeout] + "s");
-            pendingFuture = executor.schedule(pendingRunnable, watchTimeouts[currentTimeout], TimeUnit.SECONDS);
-        }
+        }, watchTimeout, TimeUnit.SECONDS);
     }
 
-    private void clearTimer() {
+    public void clearTimer() {
+        currentTimeout = -1;
+        clearPendingRunnable();
+    }
+
+    private void clearPendingRunnable() {
         if (pendingFuture != null) {
-            Logger.d(TAG, "Removed pending runnable");
+            Logger.d(TAG, "Cleared timer");
             pendingFuture.cancel(false);
             pendingFuture = null;
         }

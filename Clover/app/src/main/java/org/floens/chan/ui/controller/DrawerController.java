@@ -17,15 +17,16 @@
  */
 package org.floens.chan.ui.controller;
 
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.res.Configuration;
 import android.support.design.widget.Snackbar;
 import android.support.v4.widget.DrawerLayout;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -123,6 +124,10 @@ public class DrawerController extends Controller implements PinAdapter.Callback,
         this.childController = childController;
     }
 
+    public NavigationController getChildController() {
+        return childController;
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -156,6 +161,11 @@ public class DrawerController extends Controller implements PinAdapter.Callback,
         } else {
             return super.onBack();
         }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        return (childController != null && childController.dispatchKeyEvent(event)) || super.dispatchKeyEvent(event);
     }
 
     @Override
@@ -220,7 +230,7 @@ public class DrawerController extends Controller implements PinAdapter.Callback,
 
                         if (!TextUtils.isEmpty(value)) {
                             pin.loadable.title = value;
-                            pinAdapter.notifyDataSetChanged();
+                            Chan.getWatchManager().updatePin(pin);
                         }
                     }
                 })

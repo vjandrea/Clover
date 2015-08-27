@@ -18,8 +18,8 @@
 package org.floens.chan.ui.controller;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Context;
+import android.support.v7.app.AlertDialog;
 import android.view.View;
 import android.widget.LinearLayout;
 
@@ -27,6 +27,7 @@ import org.floens.chan.R;
 import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.activity.StartActivity;
 import org.floens.chan.ui.fragment.FolderPickFragment;
+import org.floens.chan.ui.helper.RefreshUIMessage;
 import org.floens.chan.ui.settings.BooleanSettingView;
 import org.floens.chan.ui.settings.IntegerSettingView;
 import org.floens.chan.ui.settings.LinkSettingView;
@@ -37,12 +38,21 @@ import org.floens.chan.ui.settings.StringSettingView;
 
 import java.io.File;
 
+import de.greenrobot.event.EventBus;
+
 public class AdvancedSettingsController extends SettingsController {
     private static final String TAG = "AdvancedSettingsController";
 
+    private boolean needRestart;
     private LinkSettingView saveLocation;
     private SettingView forcePhoneLayoutSetting;
-    private boolean needRestart;
+    private SettingView enableReplyFab;
+    private SettingView postFullDate;
+    private SettingView postFileInfo;
+    private SettingView postFilename;
+    private SettingView anonymize;
+    private SettingView anonymizeIds;
+    private SettingView tapNoReply;
 
     public AdvancedSettingsController(Context context) {
         super(context);
@@ -75,8 +85,12 @@ public class AdvancedSettingsController extends SettingsController {
     public void onPreferenceChange(SettingView item) {
         super.onPreferenceChange(item);
 
-        if (item == forcePhoneLayoutSetting) {
+        if (item == forcePhoneLayoutSetting || item == enableReplyFab) {
             needRestart = true;
+        }
+
+        if (item == postFullDate || item == postFileInfo || item == anonymize || item == anonymizeIds || item == tapNoReply || item == postFilename) {
+            EventBus.getDefault().post(new RefreshUIMessage("postui"));
         }
     }
 
@@ -109,11 +123,16 @@ public class AdvancedSettingsController extends SettingsController {
         settings.add(new BooleanSettingView(this, ChanSettings.shareUrl, string(R.string.setting_share_url), string(R.string.setting_share_url_description)));
         settings.add(new BooleanSettingView(this, ChanSettings.networkHttps, string(R.string.setting_network_https), string(R.string.setting_network_https_description)));
         forcePhoneLayoutSetting = settings.add(new BooleanSettingView(this, ChanSettings.forcePhoneLayout, string(R.string.setting_force_phone_layout), null));
-        settings.add(new BooleanSettingView(this, ChanSettings.anonymize, string(R.string.setting_anonymize), null));
-        settings.add(new BooleanSettingView(this, ChanSettings.anonymizeIds, string(R.string.setting_anonymize_ids), null));
+        enableReplyFab = settings.add(new BooleanSettingView(this, ChanSettings.enableReplyFab, string(R.string.setting_enable_reply_fab), string(R.string.setting_enable_reply_fab_description)));
+        anonymize = settings.add(new BooleanSettingView(this, ChanSettings.anonymize, string(R.string.setting_anonymize), null));
+        anonymizeIds = settings.add(new BooleanSettingView(this, ChanSettings.anonymizeIds, string(R.string.setting_anonymize_ids), null));
         settings.add(new BooleanSettingView(this, ChanSettings.repliesButtonsBottom, string(R.string.setting_buttons_bottom), null));
         settings.add(new BooleanSettingView(this, ChanSettings.confirmExit, string(R.string.setting_confirm_exit), null));
-        settings.add(new BooleanSettingView(this, ChanSettings.tapNoReply, string(R.string.setting_tap_no_rely), null));
+        tapNoReply = settings.add(new BooleanSettingView(this, ChanSettings.tapNoReply, string(R.string.setting_tap_no_rely), null));
+        settings.add(new BooleanSettingView(this, ChanSettings.volumeKeysScrolling, string(R.string.setting_volume_key_scrolling), null));
+        postFullDate = settings.add(new BooleanSettingView(this, ChanSettings.postFullDate, string(R.string.setting_post_full_date), null));
+        postFileInfo = settings.add(new BooleanSettingView(this, ChanSettings.postFileInfo, string(R.string.setting_post_file_info), null));
+        postFilename = settings.add(new BooleanSettingView(this, ChanSettings.postFilename, string(R.string.setting_post_filename), null));
 
         groups.add(settings);
 

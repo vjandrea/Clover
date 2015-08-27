@@ -22,8 +22,9 @@ import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.AttributeSet;
+import android.view.KeyEvent;
 import android.view.View;
-import android.widget.LinearLayout;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import org.floens.chan.R;
@@ -32,6 +33,7 @@ import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.Post;
 import org.floens.chan.core.model.PostImage;
 import org.floens.chan.core.presenter.ReplyPresenter;
+import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.adapter.PostAdapter;
 import org.floens.chan.ui.adapter.PostsFilter;
 import org.floens.chan.ui.cell.PostCell;
@@ -51,7 +53,7 @@ import static org.floens.chan.utils.AndroidUtils.getAttrColor;
 /**
  * A layout that wraps around a {@link RecyclerView} to manage showing posts.
  */
-public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyLayoutCallback {
+public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLayoutCallback {
     public static final int MAX_SMOOTH_SCROLL_DISTANCE = 20;
 
     private ReplyLayout reply;
@@ -67,6 +69,8 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
     private int spanCount = 2;
     private int background;
     private boolean searchOpen;
+    private int lastPostCount;
+    private int recyclerViewTopPadding;
 
     public ThreadListLayout(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -99,9 +103,17 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
                 // onScrolled can be called after cleanup()
                 if (showingThread != null) {
                     int index = Math.max(0, getTopAdapterPosition());
-//                    int top = recyclerView.getLayoutManager().getChildAt(0).getTop();
+                    View topChild = recyclerView.getLayoutManager().getChildAt(0);
+                    int top = topChild == null ? 0 : topChild.getTop();
+
                     showingThread.loadable.listViewIndex = index;
-//                    showingThread.loadable.listViewTop = top;
+                    showingThread.loadable.listViewTop = top;
+
+                    int last = getCompleteBottomAdapterPosition();
+                    if (last == postAdapter.getUnfilteredDisplaySize() - 1 && last > lastPostCount) {
+                        lastPostCount = last;
+                        ThreadListLayout.this.callback.onListScrolledToBottom();
+                    }
                 }
             }
         });
@@ -118,12 +130,7 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
 
         int cardWidth = getResources().getDimensionPixelSize(R.dimen.grid_card_width);
-        int maxSpans = getResources().getInteger(R.integer.grid_card_max_spans);
-
         spanCount = Math.max(1, Math.round(getMeasuredWidth() / cardWidth));
-        if (maxSpans > 1 && spanCount > maxSpans) {
-            spanCount = maxSpans;
-        }
 
         if (postViewMode == PostCellInterface.PostViewMode.CARD) {
             ((GridLayoutManager) layoutManager).setSpanCount(spanCount);
@@ -139,7 +146,8 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
             switch (postViewMode) {
                 case LIST:
                     LinearLayoutManager linearLayoutManager = new LinearLayoutManager(getContext());
-                    recyclerView.setPadding(0, topSpacing(), 0, 0);
+                    recyclerViewTopPadding = 0;
+                    recyclerView.setPadding(0, recyclerViewTopPadding + topSpacing(), 0, 0);
                     recyclerView.setLayoutManager(linearLayoutManager);
                     layoutManager = linearLayoutManager;
 
@@ -152,7 +160,8 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
                 case CARD:
                     GridLayoutManager gridLayoutManager = new GridLayoutManager(null, spanCount, GridLayoutManager.VERTICAL, false);
                     // The cards have a 4dp padding, this way there is always 8dp between the edges
-                    recyclerView.setPadding(dp(4), dp(4) + topSpacing(), dp(4), dp(4));
+                    recyclerViewTopPadding = dp(4);
+                    recyclerView.setPadding(dp(4), recyclerViewTopPadding + topSpacing(), dp(4), dp(4));
                     recyclerView.setLayoutManager(gridLayoutManager);
                     layoutManager = gridLayoutManager;
 
@@ -187,18 +196,6 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
                     ((GridLayoutManager) layoutManager).scrollToPositionWithOffset(thread.loadable.listViewIndex, thread.loadable.listViewTop);
                     break;
             }
-        } else {
-            switch (postViewMode) {
-                case LIST:
-                    LinearLayoutManager linearLayoutManager = (LinearLayoutManager) layoutManager;
-                    if (linearLayoutManager.findLastCompletelyVisibleItemPosition() == postAdapter.getItemCount() - 1) {
-                        linearLayoutManager.scrollToPositionWithOffset(postAdapter.getItemCount() - 1, 0);
-                    }
-                    break;
-                case CARD:
-                    // No op
-                    break;
-            }
         }
 
         postAdapter.setThread(thread, filter);
@@ -215,14 +212,32 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
         }
     }
 
+    public boolean sendKeyEvent(KeyEvent event) {
+        if (ChanSettings.volumeKeysScrolling.get()) {
+            switch (event.getKeyCode()) {
+                case KeyEvent.KEYCODE_VOLUME_UP:
+                case KeyEvent.KEYCODE_VOLUME_DOWN:
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        boolean down = event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_DOWN;
+                        int scroll = (int) (getHeight() * 0.75);
+                        recyclerView.smoothScrollBy(0, down ? scroll : -scroll);
+                    }
+                    return true;
+            }
+        }
+        return false;
+    }
+
     public void openReply(boolean open) {
         if (showingThread != null && replyOpen != open) {
             this.replyOpen = open;
-            AnimationUtils.animateHeight(reply, replyOpen, getWidth(), 500, reply);
+            int height = AnimationUtils.animateHeight(reply, replyOpen, getWidth(), 500);
             if (open) {
                 reply.focusComment();
+                recyclerView.setPadding(recyclerView.getPaddingLeft(), recyclerViewTopPadding + height, recyclerView.getPaddingRight(), recyclerView.getPaddingBottom());
             } else {
                 AndroidUtils.hideKeyboard(reply);
+                recyclerView.setPadding(recyclerView.getPaddingLeft(), recyclerViewTopPadding + topSpacing(), recyclerView.getPaddingRight(), recyclerView.getPaddingBottom());
             }
             threadListLayoutCallback.replyLayoutOpen(open);
 
@@ -238,13 +253,16 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
         postAdapter.showError(error);
     }
 
-    public void showSearch(boolean show) {
+    public void openSearch(boolean show) {
         if (searchOpen != show) {
             searchOpen = show;
-            AnimationUtils.animateHeight(searchStatus, show);
+            int height = AnimationUtils.animateHeight(searchStatus, show);
 
             if (show) {
                 searchStatus.setText(R.string.search_empty);
+                recyclerView.setPadding(recyclerView.getPaddingLeft(), recyclerViewTopPadding + height, recyclerView.getPaddingRight(), recyclerView.getPaddingBottom());
+            } else {
+                recyclerView.setPadding(recyclerView.getPaddingLeft(), recyclerViewTopPadding + topSpacing(), recyclerView.getPaddingRight(), recyclerView.getPaddingBottom());
             }
 
             attachToolbarScroll(!(show || replyOpen));
@@ -261,14 +279,14 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
         }
 
         if (query != null) {
-            int size = postAdapter.getDisplaySize();
+            int size = postAdapter.getDisplayList().size();
             searchStatus.setText(getContext().getString(R.string.search_results,
                     size, getContext().getResources().getQuantityString(R.plurals.posts, size, size), query));
         }
     }
 
     public boolean canChildScrollUp() {
-        if (replyOpen) {
+        if (replyOpen || searchOpen) {
             return true;
         }
 
@@ -290,19 +308,7 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
     }
 
     public boolean scrolledToBottom() {
-        switch (postViewMode) {
-            case LIST:
-                if (((LinearLayoutManager) layoutManager).findLastVisibleItemPosition() == postAdapter.getItemCount() - 1) {
-                    return true;
-                }
-                break;
-            case CARD:
-                if (((GridLayoutManager) layoutManager).findLastVisibleItemPosition() == postAdapter.getItemCount() - 1) {
-                    return true;
-                }
-                break;
-        }
-        return false;
+        return getCompleteBottomAdapterPosition() == postAdapter.getItemCount() - 1;
     }
 
     public void cleanup() {
@@ -324,8 +330,9 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
         postAdapter.cleanup();
         reply.cleanup();
         openReply(false);
-        showSearch(false);
+        openSearch(false);
         showingThread = null;
+        lastPostCount = 0;
     }
 
     public List<Post> getDisplayingPosts() {
@@ -350,20 +357,32 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
         return thumbnail;
     }
 
-    public void scrollTo(int position, boolean smooth) {
-        if (position < 0) {
-            position = recyclerView.getAdapter().getItemCount() - 1;
-        }
+    public void scrollTo(int displayPosition, boolean smooth) {
+        if (displayPosition < 0) {
+            int bottom = postAdapter.getItemCount() - 1;
+            int difference = Math.abs(bottom - getTopAdapterPosition());
+            if (difference > MAX_SMOOTH_SCROLL_DISTANCE) {
+                smooth = false;
+            }
 
-        int difference = Math.abs(position - getTopAdapterPosition());
-        if (difference > MAX_SMOOTH_SCROLL_DISTANCE) {
-            smooth = false;
-        }
-
-        if (smooth) {
-            recyclerView.smoothScrollToPosition(position);
+            if (smooth) {
+                recyclerView.smoothScrollToPosition(bottom);
+            } else {
+                recyclerView.scrollToPosition(bottom);
+            }
         } else {
-            recyclerView.scrollToPosition(position);
+            int scrollPosition = postAdapter.getScrollPosition(displayPosition);
+
+            int difference = Math.abs(scrollPosition - getTopAdapterPosition());
+            if (difference > MAX_SMOOTH_SCROLL_DISTANCE) {
+                smooth = false;
+            }
+
+            if (smooth) {
+                recyclerView.smoothScrollToPosition(scrollPosition);
+            } else {
+                recyclerView.scrollToPosition(scrollPosition);
+            }
         }
     }
 
@@ -392,6 +411,11 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
     @Override
     public void requestNewPostLoad() {
         callback.requestNewPostLoad();
+    }
+
+    @Override
+    public ChanThread getThread() {
+        return showingThread;
     }
 
     private void attachToolbarScroll(boolean attach) {
@@ -425,12 +449,12 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
         return -1;
     }
 
-    private int getCompleteTopAdapterPosition() {
+    private int getCompleteBottomAdapterPosition() {
         switch (postViewMode) {
             case LIST:
-                return ((LinearLayoutManager) layoutManager).findFirstCompletelyVisibleItemPosition();
+                return ((LinearLayoutManager) layoutManager).findLastCompletelyVisibleItemPosition();
             case CARD:
-                return ((GridLayoutManager) layoutManager).findFirstCompletelyVisibleItemPosition();
+                return ((GridLayoutManager) layoutManager).findLastCompletelyVisibleItemPosition();
         }
         return -1;
     }
@@ -439,6 +463,8 @@ public class ThreadListLayout extends LinearLayout implements ReplyLayout.ReplyL
         void showThread(Loadable loadable);
 
         void requestNewPostLoad();
+
+        void onListScrolledToBottom();
     }
 
     public interface ThreadListLayoutCallback {

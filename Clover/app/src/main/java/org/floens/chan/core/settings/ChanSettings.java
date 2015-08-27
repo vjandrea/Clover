@@ -81,11 +81,16 @@ public class ChanSettings {
     public static final BooleanSetting shareUrl;
     public static final BooleanSetting networkHttps;
     public static final BooleanSetting forcePhoneLayout;
+    public static final BooleanSetting enableReplyFab;
     public static final BooleanSetting anonymize;
     public static final BooleanSetting anonymizeIds;
     public static final BooleanSetting repliesButtonsBottom;
     public static final BooleanSetting confirmExit;
     public static final BooleanSetting tapNoReply;
+    public static final BooleanSetting volumeKeysScrolling;
+    public static final BooleanSetting postFullDate;
+    public static final BooleanSetting postFileInfo;
+    public static final BooleanSetting postFilename;
 
     public static final BooleanSetting watchEnabled;
     public static final BooleanSetting watchCountdown;
@@ -100,6 +105,8 @@ public class ChanSettings {
     public static final StringSetting passId;
 
     public static final BooleanSetting historyEnabled;
+
+    public static final IntegerSetting previousVersion;
 
     public static final BooleanSetting proxyEnabled;
     public static final StringSetting proxyAddress;
@@ -139,11 +146,16 @@ public class ChanSettings {
             }
         });
         forcePhoneLayout = new BooleanSetting(p, "preference_force_phone_layout", false);
+        enableReplyFab = new BooleanSetting(p, "preference_enable_reply_fab", true);
         anonymize = new BooleanSetting(p, "preference_anonymize", false);
         anonymizeIds = new BooleanSetting(p, "preference_anonymize_ids", false);
         repliesButtonsBottom = new BooleanSetting(p, "preference_buttons_bottom", false);
         confirmExit = new BooleanSetting(p, "preference_confirm_exit", false);
         tapNoReply = new BooleanSetting(p, "preference_tap_no_reply", false);
+        volumeKeysScrolling = new BooleanSetting(p, "preference_volume_key_scrolling", false);
+        postFullDate = new BooleanSetting(p, "preference_post_full_date", false);
+        postFileInfo = new BooleanSetting(p, "preference_post_file_info", true);
+        postFilename = new BooleanSetting(p, "preference_post_filename", false);
 
         watchEnabled = new BooleanSetting(p, "preference_watch_enabled", false, new Setting.SettingCallback<Boolean>() {
             @Override
@@ -168,6 +180,8 @@ public class ChanSettings {
         passId = new StringSetting(p, "preference_pass_id", "");
 
         historyEnabled = new BooleanSetting(p, "preference_history_enabled", true);
+
+        previousVersion = new IntegerSetting(p, "preference_previous_version", 0);
 
         proxyEnabled = new BooleanSetting(p, "preference_proxy_enabled", false, new Setting.SettingCallback<Boolean>() {
             @Override

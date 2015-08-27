@@ -17,8 +17,8 @@
  */
 package org.floens.chan.ui.settings;
 
-import android.app.AlertDialog;
 import android.content.DialogInterface;
+import android.support.v7.app.AlertDialog;
 import android.text.InputType;
 import android.view.View;
 import android.view.WindowManager;
@@ -65,6 +65,7 @@ public class IntegerSettingView extends SettingView implements View.OnClickListe
         editText.setText(setting.get().toString());
         editText.setInputType(InputType.TYPE_CLASS_NUMBER);
         editText.setSingleLine(true);
+        editText.setSelection(editText.getText().length());
 
         container.addView(editText, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
 

@@ -19,7 +19,6 @@ package org.floens.chan.ui.layout;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.ProgressDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -28,7 +27,9 @@ import android.content.DialogInterface;
 import android.support.design.widget.CoordinatorLayout;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
+import android.support.v7.app.AlertDialog;
 import android.util.AttributeSet;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
@@ -38,9 +39,11 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.android.volley.AuthFailureError;
 import com.android.volley.NetworkError;
-import com.android.volley.NoConnectionError;
+import com.android.volley.ParseError;
 import com.android.volley.ServerError;
+import com.android.volley.TimeoutError;
 import com.android.volley.VolleyError;
 
 import org.floens.chan.Chan;
@@ -97,6 +100,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     private Visible visible;
     private ProgressDialog deletingDialog;
     private boolean refreshedFromSwipe;
+    private boolean replyButtonEnabled;
     private boolean showingReplyButton = false;
     private Snackbar newPostsNotification;
 
@@ -120,6 +124,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
 
         presenter = new ThreadPresenter(this);
 
+
         loadView = (LoadView) findViewById(R.id.loadview);
         replyButton = (FloatingActionButton) findViewById(R.id.reply_button);
         replyButton.setOnClickListener(this);
@@ -135,6 +140,11 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
 
         errorRetryButton = (Button) errorLayout.findViewById(R.id.button);
         errorRetryButton.setOnClickListener(this);
+
+        replyButtonEnabled = ChanSettings.enableReplyFab.get();
+        if (!replyButtonEnabled) {
+            AndroidUtils.removeFromParentView(replyButton);
+        }
 
         switchVisible(Visible.LOADING);
     }
@@ -158,6 +168,10 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
 
     public boolean onBack() {
         return threadListLayout.onBack();
+    }
+
+    public boolean sendKeyEvent(KeyEvent event) {
+        return threadListLayout.sendKeyEvent(event);
     }
 
     public ThreadPresenter getPresenter() {
@@ -207,7 +221,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
         String errorMessage;
         if (error.getCause() instanceof SSLException) {
             errorMessage = getContext().getString(R.string.thread_load_failed_ssl);
-        } else if ((error instanceof NoConnectionError) || (error instanceof NetworkError)) {
+        } else if (error instanceof NetworkError || error instanceof TimeoutError || error instanceof ParseError || error instanceof AuthFailureError) {
             errorMessage = getContext().getString(R.string.thread_load_failed_network);
         } else if (error instanceof ServerError) {
             errorMessage = getContext().getString(R.string.thread_load_failed_server);
@@ -253,7 +267,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     }
 
     public void clipboardPost(Post post) {
-        ClipboardManager clipboard = (ClipboardManager) AndroidUtils.getAppRes().getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipboardManager clipboard = (ClipboardManager) AndroidUtils.getAppContext().getSystemService(Context.CLIPBOARD_SERVICE);
         ClipData clip = ClipData.newPlainText("Post text", post.comment.toString());
         clipboard.setPrimaryClip(clip);
         Toast.makeText(getContext(), R.string.post_text_copied, Toast.LENGTH_SHORT).show();
@@ -303,8 +317,8 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     }
 
     @Override
-    public void scrollTo(int position, boolean smooth) {
-        threadListLayout.scrollTo(position, smooth);
+    public void scrollTo(int displayPosition, boolean smooth) {
+        threadListLayout.scrollTo(displayPosition, smooth);
     }
 
     @Override
@@ -324,7 +338,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
 
     @Override
     public void showSearch(boolean show) {
-        threadListLayout.showSearch(show);
+        threadListLayout.openSearch(show);
     }
 
     public void setSearchStatus(String query, boolean setEmptyText, boolean hideKeyboard) {
@@ -403,7 +417,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
                 newPostsNotification.setAction(R.string.thread_new_posts_goto, new OnClickListener() {
                     @Override
                     public void onClick(View v) {
-                        presenter.scrollTo(-1, false);
+                        presenter.scrollTo(-1, true);
                     }
                 }).show();
                 fixSnackbarText(getContext(), newPostsNotification);
@@ -428,8 +442,12 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
         return postPopupHelper.isOpen();
     }
 
+    public void openReply(boolean open) {
+        threadListLayout.openReply(open);
+    }
+
     private void showReplyButton(boolean show) {
-        if (show != showingReplyButton) {
+        if (show != showingReplyButton && replyButtonEnabled) {
             showingReplyButton = show;
 
             replyButton.animate()

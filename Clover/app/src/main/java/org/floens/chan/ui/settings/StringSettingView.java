@@ -17,8 +17,8 @@
  */
 package org.floens.chan.ui.settings;
 
-import android.app.AlertDialog;
 import android.content.DialogInterface;
+import android.support.v7.app.AlertDialog;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
@@ -60,6 +60,7 @@ public class StringSettingView extends SettingView implements View.OnClickListen
         editText.setImeOptions(EditorInfo.IME_FLAG_NO_FULLSCREEN);
         editText.setText(setting.get());
         editText.setSingleLine(true);
+        editText.setSelection(editText.getText().length());
 
         container.addView(editText, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
 

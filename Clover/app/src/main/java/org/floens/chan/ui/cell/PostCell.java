@@ -19,6 +19,8 @@ package org.floens.chan.ui.cell;
 
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.os.Build;
@@ -36,6 +38,7 @@ import android.text.style.BackgroundColorSpan;
 import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
+import android.text.style.UnderlineSpan;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
@@ -50,6 +53,7 @@ import com.android.volley.toolbox.ImageLoader;
 import org.floens.chan.Chan;
 import org.floens.chan.R;
 import org.floens.chan.core.model.Post;
+import org.floens.chan.core.model.PostImage;
 import org.floens.chan.core.model.PostLinkable;
 import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.helper.PostHelper;
@@ -58,10 +62,12 @@ import org.floens.chan.ui.theme.ThemeHelper;
 import org.floens.chan.ui.view.FloatingMenu;
 import org.floens.chan.ui.view.FloatingMenuItem;
 import org.floens.chan.ui.view.ThumbnailView;
+import org.floens.chan.utils.AndroidUtils;
 import org.floens.chan.utils.Time;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static org.floens.chan.utils.AndroidUtils.dp;
 import static org.floens.chan.utils.AndroidUtils.getRes;
@@ -95,6 +101,7 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
     private PostCellCallback callback;
     private boolean highlighted;
     private int markedNo;
+    private boolean showDivider;
 
     private OnClickListener selfClicked = new OnClickListener() {
         @Override
@@ -158,12 +165,14 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
         dividerParams.rightMargin = paddingPx;
         divider.setLayoutParams(dividerParams);
 
+        thumbnailView.setClickable(true);
         thumbnailView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 callback.onThumbnailClicked(post, thumbnailView);
             }
         });
+        thumbnailView.setRounding(dp(2));
 
         replies.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -229,7 +238,8 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
         }
     }
 
-    public void setPost(Theme theme, final Post post, PostCellInterface.PostCellCallback callback, boolean highlighted, int markedNo, PostCellInterface.PostViewMode postViewMode) {
+    public void setPost(Theme theme, final Post post, PostCellInterface.PostCellCallback callback,
+                        boolean highlighted, int markedNo, boolean showDivider, PostCellInterface.PostViewMode postViewMode) {
         if (this.post == post && this.highlighted == highlighted && this.markedNo == markedNo) {
             return;
         }
@@ -248,6 +258,7 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
         this.callback = callback;
         this.highlighted = highlighted;
         this.markedNo = markedNo;
+        this.showDivider = showDivider;
 
         bindPost(theme, post);
     }
@@ -304,27 +315,61 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
             thumbnailView.setUrl(null, 0, 0);
         }
 
-        CharSequence[] titleParts = new CharSequence[post.subjectSpan == null ? 2 : 4];
-        int titlePartsCount = 0;
+        List<CharSequence> titleParts = new ArrayList<>(5);
 
         if (post.subjectSpan != null) {
-            titleParts[titlePartsCount++] = post.subjectSpan;
-            titleParts[titlePartsCount++] = "\n";
+            titleParts.add(post.subjectSpan);
+            titleParts.add("\n");
         }
 
-        titleParts[titlePartsCount++] = post.nameTripcodeIdCapcodeSpan;
+        titleParts.add(post.nameTripcodeIdCapcodeSpan);
 
-        CharSequence relativeTime = DateUtils.getRelativeTimeSpanString(post.time * 1000L, Time.get(), DateUtils.SECOND_IN_MILLIS, 0);
+        CharSequence time;
+        if (ChanSettings.postFullDate.get()) {
+            time = post.date;
+        } else {
+            // Force the relative date to use the english locale, and restore the previous one.
+            Configuration c = Resources.getSystem().getConfiguration();
+            Locale previousLocale = c.locale;
+            c.locale = Locale.ENGLISH;
+            Resources.getSystem().updateConfiguration(c, null);
+            time = DateUtils.getRelativeTimeSpanString(post.time * 1000L, Time.get(), DateUtils.SECOND_IN_MILLIS, 0);
+            c.locale = previousLocale;
+            Resources.getSystem().updateConfiguration(c, null);
+        }
+
         String noText = "No." + post.no;
-        SpannableString date = new SpannableString(noText + " " + relativeTime);
+        SpannableString date = new SpannableString(noText + " " + time);
         date.setSpan(new ForegroundColorSpan(theme.detailsColor), 0, date.length(), 0);
         date.setSpan(new AbsoluteSizeSpan(detailsSizePx), 0, date.length(), 0);
+        titleParts.add(date);
         if (ChanSettings.tapNoReply.get()) {
             date.setSpan(new NoClickableSpan(), 0, noText.length(), 0);
         }
-        titleParts[titlePartsCount] = date;
 
-        title.setText(TextUtils.concat(titleParts));
+        if (post.hasImage) {
+            PostImage image = post.image;
+
+            boolean postFileName = ChanSettings.postFilename.get();
+            if (postFileName) {
+                SpannableString fileInfo = new SpannableString("\n" + image.filename + "." + image.extension);
+                fileInfo.setSpan(new ForegroundColorSpan(theme.detailsColor), 0, fileInfo.length(), 0);
+                fileInfo.setSpan(new AbsoluteSizeSpan(detailsSizePx), 0, fileInfo.length(), 0);
+                fileInfo.setSpan(new UnderlineSpan(), 0, fileInfo.length(), 0);
+                titleParts.add(fileInfo);
+            }
+
+            if (ChanSettings.postFileInfo.get()) {
+                SpannableString fileInfo = new SpannableString((postFileName ? " " : "\n") + image.extension.toUpperCase() + " " +
+                        AndroidUtils.getReadableFileSize(image.size, false) + " " +
+                        image.imageWidth + "x" + image.imageHeight);
+                fileInfo.setSpan(new ForegroundColorSpan(theme.detailsColor), 0, fileInfo.length(), 0);
+                fileInfo.setSpan(new AbsoluteSizeSpan(detailsSizePx), 0, fileInfo.length(), 0);
+                titleParts.add(fileInfo);
+            }
+        }
+
+        title.setText(TextUtils.concat(titleParts.toArray(new CharSequence[titleParts.size()])));
 
         iconsSpannable = new SpannableString("");
 
@@ -406,6 +451,8 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
             comment.setPadding(comment.getPaddingLeft(), comment.getPaddingTop(), comment.getPaddingRight(), paddingPx);
             replies.setPadding(replies.getPaddingLeft(), 0, replies.getPaddingRight(), replies.getPaddingBottom());
         }
+
+        divider.setVisibility(showDivider ? VISIBLE : GONE);
     }
 
     private void unbindPost(Post post) {

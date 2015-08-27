@@ -17,6 +17,7 @@
  */
 package org.floens.chan.ui.view;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
@@ -26,12 +27,16 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.View;
 
+import com.android.volley.AuthFailureError;
 import com.android.volley.NetworkError;
-import com.android.volley.NoConnectionError;
+import com.android.volley.ParseError;
+import com.android.volley.TimeoutError;
 import com.android.volley.VolleyError;
 import com.android.volley.toolbox.ImageLoader;
 
@@ -46,17 +51,21 @@ public class ThumbnailView extends View implements ImageLoader.ImageListener {
     private int fadeTime = 200;
 
     private boolean circular = false;
+    private int rounding = 0;
+    private boolean clickable = false;
 
     private boolean calculate;
     private Bitmap bitmap;
     private RectF bitmapRect = new RectF();
-    private Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private RectF drawRect = new RectF();
     private RectF outputRect = new RectF();
 
     private Matrix matrix = new Matrix();
     BitmapShader bitmapShader;
-    private Paint roundPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+
+    private boolean foregroundCalculate = false;
+    private Drawable foreground;
 
     private boolean error = false;
     private String errorText;
@@ -104,6 +113,38 @@ public class ThumbnailView extends View implements ImageLoader.ImageListener {
         this.circular = circular;
     }
 
+    public void setRounding(int rounding) {
+        this.rounding = rounding;
+    }
+
+    @SuppressWarnings({"deprecation", "ConstantConditions"})
+    @Override
+    public void setClickable(boolean clickable) {
+        super.setClickable(clickable);
+
+        if (clickable != this.clickable) {
+            this.clickable = clickable;
+
+            foregroundCalculate = clickable;
+            if (clickable) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    foreground = getContext().getDrawable(R.drawable.item_background);
+                } else {
+                    foreground = getResources().getDrawable(R.drawable.item_background);
+                }
+                foreground.setCallback(this);
+                if (foreground.isStateful()) {
+                    foreground.setState(getDrawableState());
+                }
+            } else {
+                unscheduleDrawable(foreground);
+                foreground = null;
+            }
+            requestLayout();
+            invalidate();
+        }
+    }
+
     public void setFadeTime(int fadeTime) {
         this.fadeTime = fadeTime;
     }
@@ -124,7 +165,7 @@ public class ThumbnailView extends View implements ImageLoader.ImageListener {
     public void onErrorResponse(VolleyError e) {
         error = true;
 
-        if ((e instanceof NoConnectionError) || (e instanceof NetworkError)) {
+        if (e instanceof NetworkError || e instanceof TimeoutError || e instanceof ParseError || e instanceof AuthFailureError) {
             errorText = getString(R.string.thumbnail_load_failed_network);
         } else {
             errorText = getString(R.string.thumbnail_load_failed_server);
@@ -137,8 +178,6 @@ public class ThumbnailView extends View implements ImageLoader.ImageListener {
     protected boolean onSetAlpha(int alpha) {
         if (error) {
             textPaint.setAlpha(alpha);
-        } else if (circular) {
-            roundPaint.setAlpha(alpha);
         } else {
             paint.setAlpha(alpha);
         }
@@ -151,6 +190,7 @@ public class ThumbnailView extends View implements ImageLoader.ImageListener {
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
         calculate = true;
+        foregroundCalculate = true;
     }
 
     @Override
@@ -194,20 +234,64 @@ public class ThumbnailView extends View implements ImageLoader.ImageListener {
 
                 matrix.setRectToRect(bitmapRect, drawRect, Matrix.ScaleToFit.FILL);
 
-                if (circular) {
-                    bitmapShader.setLocalMatrix(matrix);
-                    roundPaint.setShader(bitmapShader);
-                }
+                bitmapShader.setLocalMatrix(matrix);
+                paint.setShader(bitmapShader);
             }
 
             canvas.save();
             canvas.clipRect(outputRect);
+
             if (circular) {
-                canvas.drawRoundRect(outputRect, width / 2, height / 2, roundPaint);
+                canvas.drawRoundRect(outputRect, width / 2, height / 2, paint);
             } else {
-                canvas.drawBitmap(bitmap, matrix, paint);
+                canvas.drawRoundRect(outputRect, rounding, rounding, paint);
             }
+
             canvas.restore();
+            canvas.save();
+
+            if (foreground != null) {
+                if (foregroundCalculate) {
+                    foregroundCalculate = false;
+                    foreground.setBounds(0, 0, getRight(), getBottom());
+                }
+
+                foreground.draw(canvas);
+            }
+
+            canvas.restore();
+        }
+    }
+
+    @Override
+    protected boolean verifyDrawable(Drawable who) {
+        return super.verifyDrawable(who) || (who == foreground);
+    }
+
+    @Override
+    public void jumpDrawablesToCurrentState() {
+        super.jumpDrawablesToCurrentState();
+
+        if (foreground != null) {
+            foreground.jumpToCurrentState();
+        }
+    }
+
+    @Override
+    protected void drawableStateChanged() {
+        super.drawableStateChanged();
+        if (foreground != null && foreground.isStateful()) {
+            foreground.setState(getDrawableState());
+        }
+    }
+
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    @Override
+    public void drawableHotspotChanged(float x, float y) {
+        super.drawableHotspotChanged(x, y);
+
+        if (foreground != null) {
+            foreground.setHotspot(x, y);
         }
     }
 
@@ -223,14 +307,12 @@ public class ThumbnailView extends View implements ImageLoader.ImageListener {
 
     private void setImageBitmap(Bitmap bitmap) {
         bitmapShader = null;
-        roundPaint.setShader(null);
+        paint.setShader(null);
 
         this.bitmap = bitmap;
         if (bitmap != null) {
             calculate = true;
-            if (circular) {
-                bitmapShader = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-            }
+            bitmapShader = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
         }
         invalidate();
     }

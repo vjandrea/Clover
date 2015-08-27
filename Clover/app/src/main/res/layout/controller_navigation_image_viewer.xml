@@ -25,7 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="@dimen/toolbar_height"
-        android:background="#e9000000"
+        android:background="#87000000"
         tools:ignore="UnusedAttribute" />
 
     <FrameLayout

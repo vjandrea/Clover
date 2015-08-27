@@ -113,13 +113,23 @@ public class ThreadPresenter implements ChanLoader.ChanLoaderCallback, PostAdapt
 
     public void unbindLoadable() {
         if (chanLoader != null) {
+            chanLoader.clearTimer();
             LoaderPool.getInstance().release(chanLoader, this);
             chanLoader = null;
             loadable = null;
             historyAdded = false;
             notificationPostCount = -1;
 
+            threadPresenterCallback.showNewPostsNotification(false, -1);
             threadPresenterCallback.showLoading();
+        }
+    }
+
+    public void requestInitialData() {
+        if (chanLoader.getThread() == null) {
+            requestData();
+        } else {
+            chanLoader.quickLoad();
         }
     }
 
@@ -130,13 +140,14 @@ public class ThreadPresenter implements ChanLoader.ChanLoaderCallback, PostAdapt
 
     public void onForegroundChanged(boolean foreground) {
         if (chanLoader != null) {
-            if (foreground) {
-                if (isWatching()) {
-                    chanLoader.setAutoLoadMore(true);
-                    chanLoader.requestMoreDataAndResetTimer();
+            if (foreground && isWatching()) {
+                chanLoader.requestMoreDataAndResetTimer();
+                if (chanLoader.getThread() != null) {
+                    // Show loading indicator in the status cell
+                    showPosts();
                 }
             } else {
-                chanLoader.setAutoLoadMore(false);
+                chanLoader.clearTimer();
             }
         }
     }
@@ -219,22 +230,24 @@ public class ThreadPresenter implements ChanLoader.ChanLoaderCallback, PostAdapt
             }
         }
 
-        if (loadable.isThreadMode()) {
-            int postsSize = result.posts.size();
-            if (notificationPostCount < 0) {
-                notificationPostCount = postsSize;
-            } else {
-                if (postsSize > notificationPostCount) {
-                    int more = postsSize - notificationPostCount;
-                    notificationPostCount = postsSize;
-
-                    threadPresenterCallback.showNewPostsNotification(true, more);
-                }
-            }
+        if (isWatching()) {
+            chanLoader.setTimer();
         }
 
-        chanLoader.setAutoLoadMore(isWatching());
         showPosts();
+
+        if (loadable.isThreadMode()) {
+            int postsSize = result.posts.size();
+
+            if (notificationPostCount < 0) {
+                notificationPostCount = postsSize;
+            } else if (postsSize > notificationPostCount) {
+                int more = postsSize - notificationPostCount;
+                notificationPostCount = postsSize;
+
+                threadPresenterCallback.showNewPostsNotification(true, more);
+            }
+        }
 
         if (loadable.markedNo >= 0) {
             Post markedPost = findPostById(loadable.markedNo);
@@ -270,10 +283,13 @@ public class ThreadPresenter implements ChanLoader.ChanLoaderCallback, PostAdapt
         }
 
         threadPresenterCallback.showNewPostsNotification(false, -1);
+
+        // Update the last seen indicator
+        showPosts();
     }
 
-    public void scrollTo(int position, boolean smooth) {
-        threadPresenterCallback.scrollTo(position, smooth);
+    public void scrollTo(int displayPosition, boolean smooth) {
+        threadPresenterCallback.scrollTo(displayPosition, smooth);
     }
 
     public void scrollToImage(PostImage postImage, boolean smooth) {
@@ -342,7 +358,7 @@ public class ThreadPresenter implements ChanLoader.ChanLoaderCallback, PostAdapt
         for (int i = 0; i < posts.size(); i++) {
             Post item = posts.get(i);
             if (item.hasImage) {
-                images.add(new PostImage(String.valueOf(item.tim), item.thumbnailUrl, item.imageUrl, item.filename, item.ext, item.imageWidth, item.imageHeight, item.spoiler));
+                images.add(item.image);
                 if (item.no == post.no) {
                     index = images.size() - 1;
                 }
@@ -497,7 +513,8 @@ public class ThreadPresenter implements ChanLoader.ChanLoaderCallback, PostAdapt
 
     @Override
     public boolean isWatching() {
-        return loadable.isThreadMode() && ChanSettings.autoRefreshThread.get() && chanLoader.getThread() != null &&
+        return loadable.isThreadMode() && ChanSettings.autoRefreshThread.get() &&
+                Chan.getInstance().getApplicationInForeground() && chanLoader.getThread() != null &&
                 !chanLoader.getThread().closed && !chanLoader.getThread().archived;
     }
 
@@ -639,7 +656,7 @@ public class ThreadPresenter implements ChanLoader.ChanLoaderCallback, PostAdapt
 
         void showImages(List<PostImage> images, int index, Loadable loadable, ThumbnailView thumbnail);
 
-        void scrollTo(int position, boolean smooth);
+        void scrollTo(int displayPosition, boolean smooth);
 
         void highlightPost(Post post);
 
