@@ -35,6 +35,7 @@ import org.floens.chan.R;
 import org.floens.chan.controller.Controller;
 import org.floens.chan.core.database.DatabaseManager;
 import org.floens.chan.core.manager.FilterEngine;
+import org.floens.chan.core.manager.FilterType;
 import org.floens.chan.core.model.Filter;
 import org.floens.chan.ui.helper.RefreshUIMessage;
 import org.floens.chan.ui.layout.FilterLayout;
@@ -66,7 +67,7 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
         super(context);
     }
 
-    public static String filterTypeName(FilterEngine.FilterType type) {
+    public static String filterTypeName(FilterType type) {
         switch (type) {
             case TRIPCODE:
                 return getString(R.string.filter_tripcode);
@@ -103,7 +104,7 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
         filterEngine = FilterEngine.getInstance();
         databaseManager = Chan.getDatabaseManager();
 
-        navigationItem.title = string(R.string.filters_screen);
+        navigationItem.setTitle(R.string.filters_screen);
         navigationItem.menu = new ToolbarMenu(context);
         navigationItem.menu.addItem(new ToolbarMenuItem(context, this, SEARCH_ID, R.drawable.ic_search_white_24dp));
 
@@ -115,6 +116,7 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
 
         add = (FloatingActionButton) view.findViewById(R.id.add);
         add.setOnClickListener(this);
+        theme().applyFabColor(add);
 
         adapter = new FilterAdapter();
         recyclerView.setAdapter(adapter);
@@ -139,7 +141,7 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
     public void onSubMenuItemClicked(ToolbarMenuItem parent, FloatingMenuItem item) {
     }
 
-    private void showFilterDialog(final Filter filter) {
+    public void showFilterDialog(final Filter filter) {
         final FilterLayout filterLayout = (FilterLayout) LayoutInflater.from(context).inflate(R.layout.layout_filter, null);
 
         final AlertDialog alertDialog = new AlertDialog.Builder(context)
@@ -147,9 +149,7 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
                 .setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        Filter newFilter = filterLayout.getFilter();
-                        newFilter.id = filter.id;
-                        filterEngine.addOrUpdate(newFilter);
+                        filterEngine.createOrUpdateFilter(filterLayout.getFilter());
                         EventBus.getDefault().post(new RefreshUIMessage("filters"));
                         adapter.load();
                     }
@@ -162,11 +162,12 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
                 alertDialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(enabled);
             }
         });
+
         filterLayout.setFilter(filter);
     }
 
     private void deleteFilter(Filter filter) {
-        filterEngine.remove(filter);
+        filterEngine.deleteFilter(filter);
         EventBus.getDefault().post(new RefreshUIMessage("filters"));
         adapter.load();
         //TODO: undo
@@ -204,9 +205,10 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
             holder.text.setText(filter.pattern);
             holder.text.setTextColor(getAttrColor(context, filter.enabled ? R.attr.text_color_primary : R.attr.text_color_hint));
             holder.subtext.setTextColor(getAttrColor(context, filter.enabled ? R.attr.text_color_secondary : R.attr.text_color_hint));
-            String subText = filterTypeName(FilterEngine.FilterType.forId(filter.type));
+            int types = FilterType.forFlags(filter.type).size();
+            String subText = context.getResources().getQuantityString(R.plurals.type, types, types);
 
-            subText += " - ";
+            subText += " \u2013 ";
             if (filter.allBoards) {
                 subText += context.getString(R.string.filter_summary_all_boards);
             } else {
@@ -214,7 +216,7 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
                 subText += context.getResources().getQuantityString(R.plurals.board, size, size);
             }
 
-            subText += " - " + FiltersController.actionName(FilterEngine.FilterAction.forId(filter.action));
+            subText += " \u2013 " + FiltersController.actionName(FilterEngine.FilterAction.forId(filter.action));
 
             holder.subtext.setText(subText);
         }
@@ -236,7 +238,7 @@ public class FiltersController extends Controller implements ToolbarMenuItem.Too
 
         private void load() {
             sourceList.clear();
-            sourceList.addAll(databaseManager.getFilters());
+            sourceList.addAll(databaseManager.runTaskSync(databaseManager.getDatabaseFilterManager().getFilters()));
 
             filter();
         }

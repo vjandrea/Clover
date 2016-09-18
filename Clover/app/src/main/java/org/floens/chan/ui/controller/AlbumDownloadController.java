@@ -42,12 +42,13 @@ import org.floens.chan.ui.toolbar.ToolbarMenu;
 import org.floens.chan.ui.toolbar.ToolbarMenuItem;
 import org.floens.chan.ui.view.FloatingMenuItem;
 import org.floens.chan.ui.view.GridRecyclerView;
-import org.floens.chan.ui.view.ThumbnailView;
+import org.floens.chan.ui.view.PostImageThumbnailView;
 import org.floens.chan.utils.RecyclerUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.floens.chan.ui.theme.ThemeHelper.theme;
 import static org.floens.chan.utils.AndroidUtils.dp;
 
 public class AlbumDownloadController extends Controller implements ToolbarMenuItem.ToolbarMenuItemCallback, View.OnClickListener {
@@ -83,6 +84,7 @@ public class AlbumDownloadController extends Controller implements ToolbarMenuIt
 
         download = (FloatingActionButton) view.findViewById(R.id.download);
         download.setOnClickListener(this);
+        theme().applyFabColor(download);
         recyclerView = (GridRecyclerView) view.findViewById(R.id.recycler_view);
         recyclerView.setHasFixedSize(true);
         gridLayoutManager = new GridLayoutManager(context, 3);
@@ -122,8 +124,9 @@ public class AlbumDownloadController extends Controller implements ToolbarMenuIt
                                     }
                                 }
 
-                                imageSaver.startBundledTask(folderForAlbum, tasks);
-                                navigationController.popController();
+                                if (imageSaver.startBundledTask(context, folderForAlbum, tasks)) {
+                                    navigationController.popController();
+                                }
                             }
                         })
                         .show();
@@ -165,7 +168,7 @@ public class AlbumDownloadController extends Controller implements ToolbarMenuIt
 
     private void updateTitle() {
         navigationItem.title = context.getString(R.string.album_download_screen, getCheckCount(), items.size());
-        navigationItem.updateTitle();
+        ((ToolbarNavigationController) navigationController).toolbar.updateTitle(navigationItem);
     }
 
     private void updateAllChecked() {
@@ -208,7 +211,7 @@ public class AlbumDownloadController extends Controller implements ToolbarMenuIt
         public void onBindViewHolder(AlbumDownloadCell holder, int position) {
             AlbumDownloadItem item = items.get(position);
 
-            holder.thumbnailView.setUrl(item.postImage.thumbnailUrl, dp(100), dp(100));
+            holder.thumbnailView.setPostImage(item.postImage, dp(100), dp(100));
             setItemChecked(holder, item.checked, false);
         }
 
@@ -225,13 +228,13 @@ public class AlbumDownloadController extends Controller implements ToolbarMenuIt
 
     private class AlbumDownloadCell extends RecyclerView.ViewHolder implements View.OnClickListener {
         private ImageView checkbox;
-        private ThumbnailView thumbnailView;
+        private PostImageThumbnailView thumbnailView;
 
         public AlbumDownloadCell(View itemView) {
             super(itemView);
             itemView.getLayoutParams().height = recyclerView.getRealSpanWidth();
             checkbox = (ImageView) itemView.findViewById(R.id.checkbox);
-            thumbnailView = (ThumbnailView) itemView.findViewById(R.id.thumbnail_view);
+            thumbnailView = (PostImageThumbnailView) itemView.findViewById(R.id.thumbnail_view);
             itemView.setOnClickListener(this);
         }
 

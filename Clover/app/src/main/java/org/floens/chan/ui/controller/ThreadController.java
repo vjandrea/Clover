@@ -30,13 +30,18 @@ import org.floens.chan.Chan;
 import org.floens.chan.R;
 import org.floens.chan.chan.ChanUrls;
 import org.floens.chan.controller.Controller;
+import org.floens.chan.core.manager.FilterType;
+import org.floens.chan.core.model.Filter;
 import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.Pin;
+import org.floens.chan.core.model.Post;
 import org.floens.chan.core.model.PostImage;
+import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.helper.RefreshUIMessage;
 import org.floens.chan.ui.layout.ThreadLayout;
 import org.floens.chan.ui.toolbar.Toolbar;
 import org.floens.chan.ui.view.ThumbnailView;
+import org.floens.chan.utils.AndroidUtils;
 import org.floens.chan.utils.Logger;
 
 import java.util.List;
@@ -45,7 +50,7 @@ import de.greenrobot.event.EventBus;
 
 import static org.floens.chan.utils.AndroidUtils.dp;
 
-public abstract class ThreadController extends Controller implements ThreadLayout.ThreadLayoutCallback, ImageViewerController.PreviewCallback, SwipeRefreshLayout.OnRefreshListener, ToolbarNavigationController.ToolbarSearchCallback, NfcAdapter.CreateNdefMessageCallback {
+public abstract class ThreadController extends Controller implements ThreadLayout.ThreadLayoutCallback, ImageViewerController.ImageViewerCallback, SwipeRefreshLayout.OnRefreshListener, ToolbarNavigationController.ToolbarSearchCallback, NfcAdapter.CreateNdefMessageCallback {
     private static final String TAG = "ThreadController";
 
     protected ThreadLayout threadLayout;
@@ -61,7 +66,7 @@ public abstract class ThreadController extends Controller implements ThreadLayou
 
         EventBus.getDefault().register(this);
 
-        navigationItem.collapseToolbar = true;
+        navigationItem.handlesToolbarInset = true;
 
         threadLayout = (ThreadLayout) LayoutInflater.from(context).inflate(R.layout.layout_thread, null);
         threadLayout.setCallback(this);
@@ -76,7 +81,7 @@ public abstract class ThreadController extends Controller implements ThreadLayou
 
         swipeRefreshLayout.setOnRefreshListener(this);
 
-        if (navigationItem.collapseToolbar) {
+        if (navigationItem.handlesToolbarInset) {
             int toolbarHeight = getToolbar().getToolbarHeight();
             swipeRefreshLayout.setProgressViewOffset(false, toolbarHeight - dp(40), toolbarHeight + dp(64 - 40));
         }
@@ -100,6 +105,10 @@ public abstract class ThreadController extends Controller implements ThreadLayou
      */
     public Loadable getLoadable() {
         return threadLayout.getPresenter().getLoadable();
+    }
+
+    public void selectPost(int post) {
+        threadLayout.getPresenter().selectPost(post);
     }
 
     @Override
@@ -157,6 +166,15 @@ public abstract class ThreadController extends Controller implements ThreadLayou
     }
 
     @Override
+    public void openReportController(final Post post) {
+        navigationController.pushController(new ReportController(context, post));
+    }
+
+    public void selectPostImage(PostImage postImage) {
+        threadLayout.getPresenter().selectPostImage(postImage);
+    }
+
+    @Override
     public void showImages(List<PostImage> images, int index, Loadable loadable, final ThumbnailView thumbnail) {
         // Just ignore the showImages request when the image is not loaded
         if (thumbnail.getBitmap() != null) {
@@ -181,9 +199,22 @@ public abstract class ThreadController extends Controller implements ThreadLayou
 //        presentingImageView = null;
     }
 
+    @Override
     public void scrollToImage(PostImage postImage) {
-        if (!threadLayout.postRepliesOpen()) {
-            threadLayout.getPresenter().scrollToImage(postImage, true);
+        threadLayout.getPresenter().scrollToImage(postImage, true);
+    }
+
+    @Override
+    public void showAlbum(List<PostImage> images, int index) {
+        if (threadLayout.getPresenter().getChanThread() != null) {
+            AlbumViewController albumViewController = new AlbumViewController(context);
+            albumViewController.setImages(getLoadable(), images, index, navigationItem.title);
+
+            if (doubleNavigationController != null) {
+                doubleNavigationController.pushController(albumViewController);
+            } else {
+                navigationController.pushController(albumViewController);
+            }
         }
     }
 
@@ -198,7 +229,16 @@ public abstract class ThreadController extends Controller implements ThreadLayou
 
     @Override
     public Toolbar getToolbar() {
-        return ((ToolbarNavigationController) navigationController).getToolbar();
+        if (navigationController instanceof ToolbarNavigationController) {
+            return ((ToolbarNavigationController) navigationController).getToolbar();
+        } else {
+            return null;
+        }
+    }
+
+    @Override
+    public boolean shouldToolbarCollapse() {
+        return !AndroidUtils.isTablet(context) && !ChanSettings.neverHideToolbar.get();
     }
 
     @Override
@@ -209,5 +249,19 @@ public abstract class ThreadController extends Controller implements ThreadLayou
     @Override
     public void onSearchEntered(String entered) {
         threadLayout.getPresenter().onSearchEntered(entered);
+    }
+
+    @Override
+    public void openFilterForTripcode(String tripcode) {
+        FiltersController filtersController = new FiltersController(context);
+        if (doubleNavigationController != null) {
+            doubleNavigationController.pushController(filtersController);
+        } else {
+            navigationController.pushController(filtersController);
+        }
+        Filter filter = new Filter();
+        filter.type = FilterType.TRIPCODE.flag;
+        filter.pattern = tripcode;
+        filtersController.showFilterDialog(filter);
     }
 }

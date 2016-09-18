@@ -20,9 +20,7 @@ package org.floens.chan.core.model;
 import com.j256.ormlite.field.DatabaseField;
 import com.j256.ormlite.table.DatabaseTable;
 
-import org.floens.chan.core.manager.FilterEngine;
-
-import java.util.regex.Matcher;
+import org.floens.chan.core.manager.FilterType;
 
 @DatabaseTable
 public class Filter {
@@ -32,8 +30,9 @@ public class Filter {
     @DatabaseField(canBeNull = false)
     public boolean enabled = true;
 
+    // Flags of FilterTypes that this filter is applied to
     @DatabaseField(canBeNull = false)
-    public int type = FilterEngine.FilterType.COMMENT.id;
+    public int type = FilterType.SUBJECT.flag | FilterType.COMMENT.flag;
 
     @DatabaseField(canBeNull = false)
     public String pattern;
@@ -50,10 +49,13 @@ public class Filter {
     @DatabaseField(canBeNull = false)
     public int color;
 
-    /**
-     * Cached version of {@link #pattern} compiled by {@link org.floens.chan.core.manager.FilterEngine#compile(String)}.
-     */
-    public Matcher compiledMatcher;
+    public boolean hasFilter(FilterType filterType) {
+        return (type & filterType.flag) != 0;
+    }
+
+    public String[] boardCodes() {
+        return boards.split(",");
+    }
 
     public void apply(Filter filter) {
         enabled = filter.enabled;
@@ -67,7 +69,6 @@ public class Filter {
 
     public Filter copy() {
         Filter copy = new Filter();
-        copy.id = id;
         copy.enabled = enabled;
         copy.type = type;
         copy.pattern = pattern;

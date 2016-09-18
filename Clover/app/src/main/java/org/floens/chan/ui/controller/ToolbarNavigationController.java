@@ -24,6 +24,7 @@ import org.floens.chan.R;
 import org.floens.chan.controller.Controller;
 import org.floens.chan.controller.ControllerTransition;
 import org.floens.chan.controller.NavigationController;
+import org.floens.chan.ui.toolbar.NavigationItem;
 import org.floens.chan.ui.toolbar.Toolbar;
 
 public abstract class ToolbarNavigationController extends NavigationController implements Toolbar.ToolbarCallback {
@@ -52,6 +53,34 @@ public abstract class ToolbarNavigationController extends NavigationController i
     }
 
     @Override
+    public boolean beginSwipeTransition(Controller from, Controller to) {
+        if (!super.beginSwipeTransition(from, to)) {
+            return false;
+        }
+
+        toolbar.processScrollCollapse(Toolbar.TOOLBAR_COLLAPSE_SHOW, true);
+        toolbar.beginTransition(to.navigationItem);
+        toolbar.transitionProgress(0f, false);
+
+        return true;
+    }
+
+    @Override
+    public void swipeTransitionProgress(float progress) {
+        super.swipeTransitionProgress(progress);
+
+        toolbar.transitionProgress(progress, false);
+    }
+
+    @Override
+    public void endSwipeTransition(Controller from, Controller to, boolean finish) {
+        super.endSwipeTransition(from, to, finish);
+
+        toolbar.finishTransition(finish);
+        updateToolbarCollapse(finish ? to : from, controllerTransition != null);
+    }
+
+    @Override
     public void onMenuOrBackClicked(boolean isArrow) {
         if (isArrow) {
             onBack();
@@ -69,28 +98,32 @@ public abstract class ToolbarNavigationController extends NavigationController i
     }
 
     @Override
-    public String getSearchHint() {
+    public String getSearchHint(NavigationItem item) {
         return context.getString(R.string.search_hint);
     }
 
     @Override
-    public void onSearchVisibilityChanged(boolean visible) {
-        Controller top = getTop();
-        if (top instanceof ToolbarSearchCallback) {
-            ((ToolbarSearchCallback) top).onSearchVisibilityChanged(visible);
+    public void onSearchVisibilityChanged(NavigationItem item, boolean visible) {
+        for (Controller controller : childControllers) {
+            if (controller.navigationItem == item) {
+                ((ToolbarSearchCallback) controller).onSearchVisibilityChanged(visible);
+                break;
+            }
         }
     }
 
     @Override
-    public void onSearchEntered(String entered) {
-        Controller top = getTop();
-        if (top instanceof ToolbarSearchCallback) {
-            ((ToolbarSearchCallback) top).onSearchEntered(entered);
+    public void onSearchEntered(NavigationItem item, String entered) {
+        for (Controller controller : childControllers) {
+            if (controller.navigationItem == item) {
+                ((ToolbarSearchCallback) controller).onSearchEntered(entered);
+                break;
+            }
         }
     }
 
     protected void updateToolbarCollapse(Controller controller, boolean animate) {
-        if (!controller.navigationItem.collapseToolbar) {
+        if (!controller.navigationItem.handlesToolbarInset) {
             FrameLayout.LayoutParams toViewParams = (FrameLayout.LayoutParams) controller.view.getLayoutParams();
             toViewParams.topMargin = toolbar.getToolbarHeight();
             controller.view.setLayoutParams(toViewParams);
@@ -103,9 +136,5 @@ public abstract class ToolbarNavigationController extends NavigationController i
         void onSearchVisibilityChanged(boolean visible);
 
         void onSearchEntered(String entered);
-    }
-
-    public interface ToolbarMenuCallback {
-        void onMenuOrBackClicked(boolean isArrow);
     }
 }

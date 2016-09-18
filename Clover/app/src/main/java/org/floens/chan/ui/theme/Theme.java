@@ -18,9 +18,11 @@
 package org.floens.chan.ui.theme;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
 import android.graphics.drawable.Drawable;
+import android.support.design.widget.FloatingActionButton;
 import android.widget.ImageView;
 
 import org.floens.chan.R;
@@ -37,6 +39,7 @@ public class Theme {
     public final int resValue;
     public boolean isLightTheme = true;
     public ThemeHelper.PrimaryColor primaryColor;
+    public ThemeHelper.PrimaryColor accentColor;
 
     public int textPrimary;
     public int textSecondary;
@@ -54,6 +57,8 @@ public class Theme {
     public int detailsColor;
     public int highlightedColor;
     public int savedReplyColor;
+    public int selectedColor;
+    public int textColorRevealSpoiler;
 
     public ThemeDrawable settingsDrawable;
     public ThemeDrawable imageDrawable;
@@ -64,12 +69,14 @@ public class Theme {
     public ThemeDrawable historyDrawable;
     public ThemeDrawable listAddDrawable;
     public ThemeDrawable helpDrawable;
+    public ThemeDrawable refreshDrawable;
 
     public Theme(String displayName, String name, int resValue, ThemeHelper.PrimaryColor primaryColor) {
         this.displayName = displayName;
         this.name = name;
         this.resValue = resValue;
         this.primaryColor = primaryColor;
+        accentColor = ThemeHelper.PrimaryColor.TEAL;
 
         resolveSpanColors();
         resolveDrawables();
@@ -85,8 +92,14 @@ public class Theme {
         historyDrawable = new ThemeDrawable(R.drawable.ic_history_black_24dp, 0.54f);
         listAddDrawable = new ThemeDrawable(R.drawable.ic_playlist_add_black_24dp, 0.54f);
         helpDrawable = new ThemeDrawable(R.drawable.ic_help_outline_black_24dp, 0.54f);
+        refreshDrawable = new ThemeDrawable(R.drawable.ic_refresh_black_24dp, 0.54f);
     }
 
+    public void applyFabColor(FloatingActionButton fab) {
+        fab.setBackgroundTintList(ColorStateList.valueOf(accentColor.color));
+    }
+
+    @SuppressWarnings("ResourceType")
     private void resolveSpanColors() {
         Resources.Theme theme = AndroidUtils.getAppContext().getResources().newTheme();
         theme.applyStyle(R.style.Chan_Theme, true);
@@ -106,9 +119,11 @@ public class Theme {
                 R.attr.post_details_color,
                 R.attr.post_highlighted_color,
                 R.attr.post_saved_reply_color,
+                R.attr.post_selected_color,
                 R.attr.text_color_primary,
                 R.attr.text_color_secondary,
-                R.attr.text_color_hint
+                R.attr.text_color_hint,
+                R.attr.text_color_reveal_spoiler
         });
 
         quoteColor = ta.getColor(0, 0);
@@ -124,9 +139,11 @@ public class Theme {
         detailsColor = ta.getColor(10, 0);
         highlightedColor = ta.getColor(11, 0);
         savedReplyColor = ta.getColor(12, 0);
-        textPrimary = ta.getColor(13, 0);
-        textSecondary = ta.getColor(14, 0);
-        textHint = ta.getColor(15, 0);
+        selectedColor = ta.getColor(13, 0);
+        textPrimary = ta.getColor(14, 0);
+        textSecondary = ta.getColor(15, 0);
+        textHint = ta.getColor(16, 0);
+        textColorRevealSpoiler = ta.getColor(17, 0);
 
         ta.recycle();
     }

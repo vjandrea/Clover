@@ -19,20 +19,22 @@ package org.floens.chan.core.settings;
 
 import android.content.SharedPreferences;
 import android.os.Environment;
+import android.text.TextUtils;
 
 import org.floens.chan.Chan;
 import org.floens.chan.R;
-import org.floens.chan.chan.ChanUrls;
+import org.floens.chan.core.manager.WatchManager;
 import org.floens.chan.ui.adapter.PostsFilter;
-import org.floens.chan.ui.cell.PostCellInterface;
 import org.floens.chan.utils.AndroidUtils;
 
 import java.io.File;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 
+import de.greenrobot.event.EventBus;
+
 public class ChanSettings {
-    public enum ImageAutoLoadMode {
+    public enum MediaAutoLoadMode implements OptionSettingItem {
         // ALways auto load, either wifi or mobile
         ALL("all"),
         // Only auto load if on wifi
@@ -40,34 +42,68 @@ public class ChanSettings {
         // Never auto load
         NONE("none");
 
-        public String name;
+        String name;
 
-        ImageAutoLoadMode(String name) {
+        MediaAutoLoadMode(String name) {
             this.name = name;
         }
 
-        public static ImageAutoLoadMode find(String name) {
-            for (ImageAutoLoadMode mode : ImageAutoLoadMode.values()) {
-                if (mode.name.equals(name)) {
-                    return mode;
-                }
-            }
-            return null;
+        @Override
+        public String getName() {
+            return name;
+        }
+    }
+
+    public enum PostViewMode implements OptionSettingItem {
+        LIST("list"),
+        CARD("grid");
+
+        String name;
+
+        PostViewMode(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+    }
+
+    public enum LayoutMode implements OptionSettingItem {
+        AUTO("auto"),
+        PHONE("phone"),
+        SLIDE("slide"),
+        SPLIT("split");
+
+        String name;
+
+        LayoutMode(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public String getName() {
+            return name;
         }
     }
 
     private static Proxy proxy;
 
     private static final StringSetting theme;
+    public static final OptionsSetting<LayoutMode> layoutMode;
     public static final StringSetting fontSize;
+    public static final BooleanSetting fontCondensed;
     public static final BooleanSetting openLinkConfirmation;
     public static final BooleanSetting autoRefreshThread;
     //    public static final BooleanSetting imageAutoLoad;
-    public static final StringSetting imageAutoLoadNetwork;
-    public static final BooleanSetting videoAutoLoad;
+    public static final OptionsSetting<MediaAutoLoadMode> imageAutoLoadNetwork;
+    public static final OptionsSetting<MediaAutoLoadMode> videoAutoLoadNetwork;
     public static final BooleanSetting videoOpenExternal;
+    public static final BooleanSetting textOnly;
     public static final BooleanSetting videoErrorIgnore;
-    public static final StringSetting boardViewMode;
+    public static final OptionsSetting<PostViewMode> boardViewMode;
+    public static final IntegerSetting boardGridSpanCount;
     public static final StringSetting boardOrder;
 
     public static final StringSetting postDefaultName;
@@ -80,10 +116,12 @@ public class ChanSettings {
     public static final BooleanSetting saveOriginalFilename;
     public static final BooleanSetting shareUrl;
     public static final BooleanSetting networkHttps;
-    public static final BooleanSetting forcePhoneLayout;
     public static final BooleanSetting enableReplyFab;
     public static final BooleanSetting anonymize;
     public static final BooleanSetting anonymizeIds;
+    public static final BooleanSetting showAnonymousName;
+    public static final BooleanSetting revealImageSpoilers;
+    public static final BooleanSetting revealTextSpoilers;
     public static final BooleanSetting repliesButtonsBottom;
     public static final BooleanSetting confirmExit;
     public static final BooleanSetting tapNoReply;
@@ -91,13 +129,17 @@ public class ChanSettings {
     public static final BooleanSetting postFullDate;
     public static final BooleanSetting postFileInfo;
     public static final BooleanSetting postFilename;
+    public static final BooleanSetting neverHideToolbar;
+    public static final BooleanSetting controllerSwipeable;
+    public static final BooleanSetting saveBoardFolder;
 
     public static final BooleanSetting watchEnabled;
     public static final BooleanSetting watchCountdown;
     public static final BooleanSetting watchBackground;
-    public static final StringSetting watchBackgroundTimeout;
+    public static final IntegerSetting watchBackgroundInterval;
     public static final StringSetting watchNotifyMode;
     public static final StringSetting watchSound;
+    public static final BooleanSetting watchPeek;
     public static final StringSetting watchLed;
 
     public static final StringSetting passToken;
@@ -112,22 +154,48 @@ public class ChanSettings {
     public static final StringSetting proxyAddress;
     public static final IntegerSetting proxyPort;
 
+    public static final CounterSetting settingsOpenCounter;
+    public static final CounterSetting historyOpenCounter;
+    public static final CounterSetting replyOpenCounter;
+    public static final CounterSetting threadOpenCounter;
+
+    public enum TestOptions implements OptionSettingItem {
+        ONE("one"),
+        TWO("two"),
+        THREE("three");
+
+        String name;
+
+        TestOptions(String name) {
+            this.name = name;
+        }
+
+        public String getName() {
+            return name;
+        }
+    }
+
     static {
         SharedPreferences p = AndroidUtils.getPreferences();
 
         theme = new StringSetting(p, "preference_theme", "light");
 
+        layoutMode = new OptionsSetting<>(p, "preference_layout_mode", LayoutMode.values(), LayoutMode.AUTO);
+
         boolean tablet = AndroidUtils.getRes().getBoolean(R.bool.is_tablet);
 
         fontSize = new StringSetting(p, "preference_font", tablet ? "16" : "14");
-        openLinkConfirmation = new BooleanSetting(p, "preference_open_link_confirmation", true);
+        fontCondensed = new BooleanSetting(p, "preference_font_condensed", false);
+        openLinkConfirmation = new BooleanSetting(p, "preference_open_link_confirmation", false);
         autoRefreshThread = new BooleanSetting(p, "preference_auto_refresh_thread", true);
 //        imageAutoLoad = new BooleanSetting(p, "preference_image_auto_load", true);
-        imageAutoLoadNetwork = new StringSetting(p, "preference_image_auto_load_network", ImageAutoLoadMode.WIFI.name);
-        videoAutoLoad = new BooleanSetting(p, "preference_autoplay", false);
+        imageAutoLoadNetwork = new OptionsSetting<>(p, "preference_image_auto_load_network", MediaAutoLoadMode.values(), MediaAutoLoadMode.WIFI);
+        videoAutoLoadNetwork = new OptionsSetting<>(p, "preference_video_auto_load_network", MediaAutoLoadMode.values(), MediaAutoLoadMode.WIFI);
         videoOpenExternal = new BooleanSetting(p, "preference_video_external", false);
+        textOnly = new BooleanSetting(p, "preference_text_only", false);
         videoErrorIgnore = new BooleanSetting(p, "preference_video_error_ignore", false);
-        boardViewMode = new StringSetting(p, "preference_board_view_mode", PostCellInterface.PostViewMode.LIST.name); // "list" or "grid"
+        boardViewMode = new OptionsSetting<>(p, "preference_board_view_mode", PostViewMode.values(), PostViewMode.LIST);
+        boardGridSpanCount = new IntegerSetting(p, "preference_board_grid_span_count", 0);
         boardOrder = new StringSetting(p, "preference_board_order", PostsFilter.Order.BUMP.name);
 
         postDefaultName = new StringSetting(p, "preference_default_name", "");
@@ -137,18 +205,21 @@ public class ChanSettings {
         developer = new BooleanSetting(p, "preference_developer", false);
 
         saveLocation = new StringSetting(p, "preference_image_save_location", Environment.getExternalStorageDirectory() + File.separator + "Clover");
-        saveOriginalFilename = new BooleanSetting(p, "preference_image_save_original", false);
-        shareUrl = new BooleanSetting(p, "preference_image_share_url", false);
-        networkHttps = new BooleanSetting(p, "preference_network_https", true, new Setting.SettingCallback<Boolean>() {
+        saveLocation.addCallback(new Setting.SettingCallback<String>() {
             @Override
-            public void onValueChange(Setting setting, Boolean value) {
-                ChanUrls.loadScheme(value);
+            public void onValueChange(Setting setting, String value) {
+                EventBus.getDefault().post(new SettingChanged<>(saveLocation));
             }
         });
-        forcePhoneLayout = new BooleanSetting(p, "preference_force_phone_layout", false);
+        saveOriginalFilename = new BooleanSetting(p, "preference_image_save_original", false);
+        shareUrl = new BooleanSetting(p, "preference_image_share_url", false);
+        networkHttps = new BooleanSetting(p, "preference_network_https", true);
         enableReplyFab = new BooleanSetting(p, "preference_enable_reply_fab", true);
         anonymize = new BooleanSetting(p, "preference_anonymize", false);
         anonymizeIds = new BooleanSetting(p, "preference_anonymize_ids", false);
+        showAnonymousName = new BooleanSetting(p, "preference_show_anonymous_name", false);
+        revealImageSpoilers = new BooleanSetting(p, "preference_reveal_image_spoilers", false);
+        revealTextSpoilers = new BooleanSetting(p, "preference_reveal_text_spoilers", false);
         repliesButtonsBottom = new BooleanSetting(p, "preference_buttons_bottom", false);
         confirmExit = new BooleanSetting(p, "preference_confirm_exit", false);
         tapNoReply = new BooleanSetting(p, "preference_tap_no_reply", false);
@@ -156,23 +227,29 @@ public class ChanSettings {
         postFullDate = new BooleanSetting(p, "preference_post_full_date", false);
         postFileInfo = new BooleanSetting(p, "preference_post_file_info", true);
         postFilename = new BooleanSetting(p, "preference_post_filename", false);
+        neverHideToolbar = new BooleanSetting(p, "preference_never_hide_toolbar", false);
+        controllerSwipeable = new BooleanSetting(p, "preference_controller_swipeable", true);
+        saveBoardFolder = new BooleanSetting(p, "preference_save_subboard", false);
 
-        watchEnabled = new BooleanSetting(p, "preference_watch_enabled", false, new Setting.SettingCallback<Boolean>() {
+        watchEnabled = new BooleanSetting(p, "preference_watch_enabled", false);
+        watchEnabled.addCallback(new Setting.SettingCallback<Boolean>() {
             @Override
             public void onValueChange(Setting setting, Boolean value) {
                 Chan.getWatchManager().onWatchEnabledChanged(value);
             }
         });
         watchCountdown = new BooleanSetting(p, "preference_watch_countdown", false);
-        watchBackground = new BooleanSetting(p, "preference_watch_background_enabled", false, new Setting.SettingCallback<Boolean>() {
+        watchBackground = new BooleanSetting(p, "preference_watch_background_enabled", false);
+        watchBackground.addCallback(new Setting.SettingCallback<Boolean>() {
             @Override
             public void onValueChange(Setting setting, Boolean value) {
                 Chan.getWatchManager().onBackgroundWatchingChanged(value);
             }
         });
-        watchBackgroundTimeout = new StringSetting(p, "preference_watch_background_timeout", "60");
+        watchBackgroundInterval = new IntegerSetting(p, "preference_watch_background_interval", WatchManager.DEFAULT_BACKGROUND_INTERVAL);
         watchNotifyMode = new StringSetting(p, "preference_watch_notify_mode", "all");
         watchSound = new StringSetting(p, "preference_watch_sound", "quotes");
+        watchPeek = new BooleanSetting(p, "preference_watch_peek", true);
         watchLed = new StringSetting(p, "preference_watch_led", "ffffffff");
 
         passToken = new StringSetting(p, "preference_pass_token", "");
@@ -183,19 +260,22 @@ public class ChanSettings {
 
         previousVersion = new IntegerSetting(p, "preference_previous_version", 0);
 
-        proxyEnabled = new BooleanSetting(p, "preference_proxy_enabled", false, new Setting.SettingCallback<Boolean>() {
+        proxyEnabled = new BooleanSetting(p, "preference_proxy_enabled", false);
+        proxyEnabled.addCallback(new Setting.SettingCallback<Boolean>() {
             @Override
             public void onValueChange(Setting setting, Boolean value) {
                 loadProxy();
             }
         });
-        proxyAddress = new StringSetting(p, "preference_proxy_address", "", new Setting.SettingCallback<String>() {
+        proxyAddress = new StringSetting(p, "preference_proxy_address", "");
+        proxyAddress.addCallback(new Setting.SettingCallback<String>() {
             @Override
             public void onValueChange(Setting setting, String value) {
                 loadProxy();
             }
         });
-        proxyPort = new IntegerSetting(p, "preference_proxy_port", 80, new Setting.SettingCallback<Integer>() {
+        proxyPort = new IntegerSetting(p, "preference_proxy_port", 80);
+        proxyPort.addCallback(new Setting.SettingCallback<Integer>() {
             @Override
             public void onValueChange(Setting setting, Integer value) {
                 loadProxy();
@@ -203,10 +283,17 @@ public class ChanSettings {
         });
         loadProxy();
 
+        settingsOpenCounter = new CounterSetting(p, "counter_settings_open");
+        historyOpenCounter = new CounterSetting(p, "counter_history_open");
+        replyOpenCounter = new CounterSetting(p, "counter_reply_open");
+        threadOpenCounter = new CounterSetting(p, "counter_thread_open");
+
         // Old (but possibly still in some users phone)
         // preference_board_view_mode default "list"
         // preference_board_editor_filler default false
         // preference_pass_enabled default false
+        // preference_autoplay false
+        // preference_watch_background_timeout "60" the old timeout background setting in minutes
     }
 
     public static boolean passLoggedIn() {
@@ -218,22 +305,25 @@ public class ChanSettings {
 
         String theme = themeRaw;
         String color = null;
+        String accentColor = null;
 
         String[] splitted = themeRaw.split(",");
-        if (splitted.length == 2) {
+        if (splitted.length >= 2) {
             theme = splitted[0];
             color = splitted[1];
+            if (splitted.length == 3) {
+                accentColor = splitted[2];
+            }
         }
 
-        return new ThemeColor(theme, color);
+        return new ThemeColor(theme, color, accentColor);
     }
 
     public static void setThemeAndColor(ThemeColor themeColor) {
-        if (themeColor.color != null) {
-            ChanSettings.theme.set(themeColor.theme + "," + themeColor.color);
-        } else {
-            ChanSettings.theme.set(themeColor.theme);
+        if (TextUtils.isEmpty(themeColor.color) || TextUtils.isEmpty(themeColor.accentColor)) {
+            throw new IllegalArgumentException();
         }
+        ChanSettings.theme.set(themeColor.theme + "," + themeColor.color + "," + themeColor.accentColor);
     }
 
     /**
@@ -256,10 +346,20 @@ public class ChanSettings {
     public static class ThemeColor {
         public String theme;
         public String color;
+        public String accentColor;
 
-        public ThemeColor(String theme, String color) {
+        public ThemeColor(String theme, String color, String accentColor) {
             this.theme = theme;
             this.color = color;
+            this.accentColor = accentColor;
+        }
+    }
+
+    public static class SettingChanged<T> {
+        public final Setting<T> setting;
+
+        public SettingChanged(Setting<T> setting) {
+            this.setting = setting;
         }
     }
 }

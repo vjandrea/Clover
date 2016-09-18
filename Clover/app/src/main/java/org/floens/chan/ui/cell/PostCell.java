@@ -19,10 +19,14 @@ package org.floens.chan.ui.cell;
 
 import android.annotation.TargetApi;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
-import android.graphics.drawable.BitmapDrawable;
 import android.os.Build;
 import android.support.annotation.NonNull;
 import android.text.Layout;
@@ -33,11 +37,8 @@ import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
 import android.text.method.LinkMovementMethod;
-import android.text.style.AbsoluteSizeSpan;
 import android.text.style.BackgroundColorSpan;
 import android.text.style.ClickableSpan;
-import android.text.style.ForegroundColorSpan;
-import android.text.style.StyleSpan;
 import android.text.style.UnderlineSpan;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
@@ -57,39 +58,45 @@ import org.floens.chan.core.model.PostImage;
 import org.floens.chan.core.model.PostLinkable;
 import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.helper.PostHelper;
+import org.floens.chan.ui.span.AbsoluteSizeSpanHashed;
+import org.floens.chan.ui.span.ForegroundColorSpanHashed;
+import org.floens.chan.ui.text.FastTextView;
+import org.floens.chan.ui.text.FastTextViewMovementMethod;
 import org.floens.chan.ui.theme.Theme;
 import org.floens.chan.ui.theme.ThemeHelper;
 import org.floens.chan.ui.view.FloatingMenu;
 import org.floens.chan.ui.view.FloatingMenuItem;
+import org.floens.chan.ui.view.PostImageThumbnailView;
 import org.floens.chan.ui.view.ThumbnailView;
 import org.floens.chan.utils.AndroidUtils;
 import org.floens.chan.utils.Time;
 
+import java.text.BreakIterator;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
+import static android.text.TextUtils.isEmpty;
+import static org.floens.chan.utils.AndroidUtils.ROBOTO_CONDENSED_REGULAR;
 import static org.floens.chan.utils.AndroidUtils.dp;
-import static org.floens.chan.utils.AndroidUtils.getRes;
+import static org.floens.chan.utils.AndroidUtils.getString;
 import static org.floens.chan.utils.AndroidUtils.setRoundItemBackground;
 import static org.floens.chan.utils.AndroidUtils.sp;
 
-public class PostCell extends LinearLayout implements PostCellInterface, PostLinkable.Callback {
-    private static final int COMMENT_MAX_LENGTH_BOARD = 500;
+public class PostCell extends LinearLayout implements PostCellInterface {
+    private static final String TAG = "PostCell";
+    private static final int COMMENT_MAX_LENGTH_BOARD = 350;
 
-    private ThumbnailView thumbnailView;
-    private TextView title;
-    private TextView icons;
+    private PostImageThumbnailView thumbnailView;
+    private FastTextView title;
+    private PostIcons icons;
     private TextView comment;
-    private TextView replies;
+    private FastTextView replies;
     private ImageView options;
     private View divider;
     private View filterMatchColor;
 
     private boolean commentClickable = false;
-    private CharSequence iconsSpannable;
     private int detailsSizePx;
-    private int iconsTextSize;
     private int countrySizePx;
     private int paddingPx;
     private boolean threadMode;
@@ -100,6 +107,7 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
     private Post post;
     private PostCellCallback callback;
     private boolean highlighted;
+    private boolean selected;
     private int markedNo;
     private boolean showDivider;
 
@@ -113,7 +121,8 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
             }
         }
     };
-    private ImageLoader.ImageContainer countryIconRequest;
+    private PostViewMovementMethod commentMovementMethod = new PostViewMovementMethod();
+    private PostViewFastMovementMethod titleMovementMethod = new PostViewFastMovementMethod();
 
     public PostCell(Context context) {
         super(context);
@@ -131,11 +140,11 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
     protected void onFinishInflate() {
         super.onFinishInflate();
 
-        thumbnailView = (ThumbnailView) findViewById(R.id.thumbnail_view);
-        title = (TextView) findViewById(R.id.title);
-        icons = (TextView) findViewById(R.id.icons);
+        thumbnailView = (PostImageThumbnailView) findViewById(R.id.thumbnail_view);
+        title = (FastTextView) findViewById(R.id.title);
+        icons = (PostIcons) findViewById(R.id.icons);
         comment = (TextView) findViewById(R.id.comment);
-        replies = (TextView) findViewById(R.id.replies);
+        replies = (FastTextView) findViewById(R.id.replies);
         options = (ImageView) findViewById(R.id.options);
         divider = findViewById(R.id.divider);
         filterMatchColor = findViewById(R.id.filter_match_color);
@@ -146,13 +155,17 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
         title.setTextSize(textSizeSp);
         title.setPadding(paddingPx, paddingPx, dp(52), 0);
 
-        iconsTextSize = sp(textSizeSp);
         countrySizePx = sp(textSizeSp - 3);
-        icons.setTextSize(textSizeSp);
+        icons.setHeight(sp(textSizeSp));
+        icons.setSpacing(dp(4));
         icons.setPadding(paddingPx, dp(4), paddingPx, 0);
 
         comment.setTextSize(textSizeSp);
         comment.setPadding(paddingPx, paddingPx, paddingPx, 0);
+
+        if (ChanSettings.fontCondensed.get()) {
+            comment.setTypeface(ROBOTO_CONDENSED_REGULAR);
+        }
 
         replies.setTextSize(textSizeSp);
         replies.setPadding(paddingPx, 0, paddingPx, paddingPx);
@@ -239,8 +252,8 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
     }
 
     public void setPost(Theme theme, final Post post, PostCellInterface.PostCellCallback callback,
-                        boolean highlighted, int markedNo, boolean showDivider, PostCellInterface.PostViewMode postViewMode) {
-        if (this.post == post && this.highlighted == highlighted && this.markedNo == markedNo) {
+                        boolean highlighted, boolean selected, int markedNo, boolean showDivider, ChanSettings.PostViewMode postViewMode) {
+        if (this.post == post && this.highlighted == highlighted && this.selected == selected && this.markedNo == markedNo && this.showDivider == showDivider) {
             return;
         }
 
@@ -257,6 +270,7 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
         this.post = post;
         this.callback = callback;
         this.highlighted = highlighted;
+        this.selected = selected;
         this.markedNo = markedNo;
         this.showDivider = showDivider;
 
@@ -282,7 +296,7 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
 
         threadMode = callback.getLoadable().isThreadMode();
 
-        setPostLinkableListener(post, this);
+        setPostLinkableListener(post, true);
 
         replies.setClickable(threadMode);
 
@@ -294,6 +308,8 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
             setBackgroundColor(theme.highlightedColor);
         } else if (post.isSavedReply) {
             setBackgroundColor(theme.savedReplyColor);
+        } else if (selected) {
+            setBackgroundColor(theme.selectedColor);
         } else if (threadMode) {
             setBackgroundResource(0);
         } else {
@@ -307,12 +323,12 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
             filterMatchColor.setVisibility(View.GONE);
         }
 
-        if (post.hasImage) {
+        if (post.hasImage && !ChanSettings.textOnly.get()) {
             thumbnailView.setVisibility(View.VISIBLE);
-            thumbnailView.setUrl(post.thumbnailUrl, thumbnailView.getLayoutParams().width, thumbnailView.getLayoutParams().height);
+            thumbnailView.setPostImage(post.image, thumbnailView.getLayoutParams().width, thumbnailView.getLayoutParams().height);
         } else {
             thumbnailView.setVisibility(View.GONE);
-            thumbnailView.setUrl(null, 0, 0);
+            thumbnailView.setPostImage(null, 0, 0);
         }
 
         List<CharSequence> titleParts = new ArrayList<>(5);
@@ -326,35 +342,41 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
 
         CharSequence time;
         if (ChanSettings.postFullDate.get()) {
-            time = post.date;
+            time = PostHelper.getLocalDate(post);
         } else {
+            // Disabled for performance reasons
             // Force the relative date to use the english locale, and restore the previous one.
-            Configuration c = Resources.getSystem().getConfiguration();
+            /*Configuration c = Resources.getSystem().getConfiguration();
             Locale previousLocale = c.locale;
             c.locale = Locale.ENGLISH;
             Resources.getSystem().updateConfiguration(c, null);
             time = DateUtils.getRelativeTimeSpanString(post.time * 1000L, Time.get(), DateUtils.SECOND_IN_MILLIS, 0);
             c.locale = previousLocale;
-            Resources.getSystem().updateConfiguration(c, null);
+            Resources.getSystem().updateConfiguration(c, null);*/
+            time = DateUtils.getRelativeTimeSpanString(post.time * 1000L, Time.get(), DateUtils.SECOND_IN_MILLIS, 0);
         }
 
         String noText = "No." + post.no;
         SpannableString date = new SpannableString(noText + " " + time);
-        date.setSpan(new ForegroundColorSpan(theme.detailsColor), 0, date.length(), 0);
-        date.setSpan(new AbsoluteSizeSpan(detailsSizePx), 0, date.length(), 0);
-        titleParts.add(date);
-        if (ChanSettings.tapNoReply.get()) {
+        date.setSpan(new ForegroundColorSpanHashed(theme.detailsColor), 0, date.length(), 0);
+        date.setSpan(new AbsoluteSizeSpanHashed(detailsSizePx), 0, date.length(), 0);
+
+        boolean noClickable = ChanSettings.tapNoReply.get();
+        if (noClickable) {
             date.setSpan(new NoClickableSpan(), 0, noText.length(), 0);
         }
+
+        titleParts.add(date);
 
         if (post.hasImage) {
             PostImage image = post.image;
 
             boolean postFileName = ChanSettings.postFilename.get();
             if (postFileName) {
-                SpannableString fileInfo = new SpannableString("\n" + image.filename + "." + image.extension);
-                fileInfo.setSpan(new ForegroundColorSpan(theme.detailsColor), 0, fileInfo.length(), 0);
-                fileInfo.setSpan(new AbsoluteSizeSpan(detailsSizePx), 0, fileInfo.length(), 0);
+                String filename = image.spoiler ? getString(R.string.image_spoiler_filename) : image.filename + "." + image.extension;
+                SpannableString fileInfo = new SpannableString("\n" + filename);
+                fileInfo.setSpan(new ForegroundColorSpanHashed(theme.detailsColor), 0, fileInfo.length(), 0);
+                fileInfo.setSpan(new AbsoluteSizeSpanHashed(detailsSizePx), 0, fileInfo.length(), 0);
                 fileInfo.setSpan(new UnderlineSpan(), 0, fileInfo.length(), 0);
                 titleParts.add(fileInfo);
             }
@@ -363,63 +385,52 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
                 SpannableString fileInfo = new SpannableString((postFileName ? " " : "\n") + image.extension.toUpperCase() + " " +
                         AndroidUtils.getReadableFileSize(image.size, false) + " " +
                         image.imageWidth + "x" + image.imageHeight);
-                fileInfo.setSpan(new ForegroundColorSpan(theme.detailsColor), 0, fileInfo.length(), 0);
-                fileInfo.setSpan(new AbsoluteSizeSpan(detailsSizePx), 0, fileInfo.length(), 0);
+                fileInfo.setSpan(new ForegroundColorSpanHashed(theme.detailsColor), 0, fileInfo.length(), 0);
+                fileInfo.setSpan(new AbsoluteSizeSpanHashed(detailsSizePx), 0, fileInfo.length(), 0);
                 titleParts.add(fileInfo);
             }
         }
 
         title.setText(TextUtils.concat(titleParts.toArray(new CharSequence[titleParts.size()])));
 
-        iconsSpannable = new SpannableString("");
+        icons.edit();
+        icons.set(PostIcons.STICKY, post.sticky);
+        icons.set(PostIcons.CLOSED, post.closed);
+        icons.set(PostIcons.DELETED, post.deleted.get());
+        icons.set(PostIcons.ARCHIVED, post.archived);
 
-        if (post.sticky) {
-            iconsSpannable = PostHelper.addIcon(iconsSpannable, PostHelper.stickyIcon, iconsTextSize);
-        }
-
-        if (post.closed) {
-            iconsSpannable = PostHelper.addIcon(iconsSpannable, PostHelper.closedIcon, iconsTextSize);
-        }
-
-        if (post.deleted.get()) {
-            iconsSpannable = PostHelper.addIcon(iconsSpannable, PostHelper.trashIcon, iconsTextSize);
-        }
-
-        if (post.archived) {
-            iconsSpannable = PostHelper.addIcon(iconsSpannable, PostHelper.archivedIcon, iconsTextSize);
-        }
-
-        boolean waitingForCountry = false;
-        if (!TextUtils.isEmpty(post.country)) {
-            loadCountryIcon(theme);
-            waitingForCountry = true;
-        }
-
-        if (iconsSpannable.length() > 0 || waitingForCountry) {
-            icons.setVisibility(VISIBLE);
-            icons.setText(iconsSpannable);
+        if (!isEmpty(post.country)) {
+            icons.set(PostIcons.COUNTRY, true);
+            icons.showCountry(post, theme, countrySizePx);
         } else {
-            icons.setVisibility(GONE);
-            icons.setText("");
+            icons.set(PostIcons.COUNTRY, false);
         }
+
+        icons.apply();
 
         CharSequence commentText;
         if (post.comment.length() > COMMENT_MAX_LENGTH_BOARD && !threadMode) {
-            commentText = post.comment.subSequence(0, COMMENT_MAX_LENGTH_BOARD);
+            BreakIterator bi = BreakIterator.getWordInstance();
+            bi.setText(post.comment.toString());
+            int precedingBoundary = bi.preceding(COMMENT_MAX_LENGTH_BOARD);
+            // Fallback to old method in case the comment does not have any spaces/individual words
+            commentText = precedingBoundary > 0 ? post.comment.subSequence(0, precedingBoundary) : post.comment.subSequence(0, COMMENT_MAX_LENGTH_BOARD);
         } else {
             commentText = post.comment;
         }
 
         comment.setText(commentText);
-        comment.setVisibility(TextUtils.isEmpty(commentText) && !post.hasImage ? GONE : VISIBLE);
+        comment.setVisibility(isEmpty(commentText) && !post.hasImage ? GONE : VISIBLE);
 
         if (commentClickable != threadMode) {
             commentClickable = threadMode;
             if (commentClickable) {
-                PostViewMovementMethod movementMethod = new PostViewMovementMethod();
-                comment.setMovementMethod(movementMethod);
+                comment.setMovementMethod(commentMovementMethod);
                 comment.setOnClickListener(selfClicked);
-                title.setMovementMethod(movementMethod);
+
+                if (noClickable) {
+                    title.setMovementMethod(titleMovementMethod);
+                }
             } else {
                 comment.setOnClickListener(null);
                 comment.setClickable(false);
@@ -458,67 +469,26 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
     private void unbindPost(Post post) {
         bound = false;
 
-        if (countryIconRequest != null) {
-            countryIconRequest.cancelRequest();
-            countryIconRequest = null;
-        }
+        icons.cancelCountryRequest();
 
-        setPostLinkableListener(post, null);
+        setPostLinkableListener(post, false);
     }
 
-    private void setPostLinkableListener(Post post, PostLinkable.Callback callback) {
+    private void setPostLinkableListener(Post post, boolean bind) {
         if (post.comment instanceof Spanned) {
-            Spanned commentSpannable = (Spanned) post.comment;
-            PostLinkable[] linkables = commentSpannable.getSpans(0, commentSpannable.length(), PostLinkable.class);
+            Spanned commentSpanned = (Spanned) post.comment;
+            PostLinkable[] linkables = commentSpanned.getSpans(0, commentSpanned.length(), PostLinkable.class);
             for (PostLinkable linkable : linkables) {
-                if (callback == null) {
-                    while (linkable.hasCallback(this)) {
-                        linkable.removeCallback(this);
-                    }
-                } else {
-                    if (!linkable.hasCallback(this)) {
-                        linkable.addCallback(callback);
-                    }
+                linkable.setMarkedNo(bind ? markedNo : -1);
+            }
+
+            if (!bind) {
+                if (commentSpanned instanceof Spannable) {
+                    Spannable commentSpannable = (Spannable) commentSpanned;
+                    commentSpannable.removeSpan(BACKGROUND_SPAN);
                 }
             }
         }
-    }
-
-    private void loadCountryIcon(final Theme theme) {
-        countryIconRequest = Chan.getVolleyImageLoader().get(post.countryUrl, new ImageLoader.ImageListener() {
-            @Override
-            public void onResponse(ImageLoader.ImageContainer response, boolean isImmediate) {
-                if (response.getBitmap() != null) {
-                    CharSequence countryIcon = PostHelper.addIcon(new BitmapDrawable(getRes(), response.getBitmap()), iconsTextSize);
-
-                    SpannableString countryText = new SpannableString(post.countryName);
-                    countryText.setSpan(new StyleSpan(Typeface.ITALIC), 0, countryText.length(), 0);
-                    countryText.setSpan(new ForegroundColorSpan(theme.detailsColor), 0, countryText.length(), 0);
-                    countryText.setSpan(new AbsoluteSizeSpan(countrySizePx), 0, countryText.length(), 0);
-
-                    iconsSpannable = TextUtils.concat(iconsSpannable, countryIcon, countryText);
-
-                    if (!isImmediate) {
-                        icons.setVisibility(VISIBLE);
-                        icons.setText(iconsSpannable);
-                    }
-                }
-            }
-
-            @Override
-            public void onErrorResponse(VolleyError error) {
-            }
-        });
-    }
-
-    @Override
-    public void onLinkableClick(PostLinkable postLinkable) {
-        callback.onPostLinkableClicked(postLinkable);
-    }
-
-    @Override
-    public int getMarkedNo(PostLinkable postLinkable) {
-        return markedNo;
     }
 
     private static BackgroundColorSpan BACKGROUND_SPAN = new BackgroundColorSpan(0x6633B5E5);
@@ -549,12 +519,16 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
                 ClickableSpan[] link = buffer.getSpans(off, off, ClickableSpan.class);
 
                 if (link.length != 0) {
+                    ClickableSpan clickableSpan = link[0];
                     if (action == MotionEvent.ACTION_UP) {
                         ignoreNextOnClick = true;
-                        link[0].onClick(widget);
+                        clickableSpan.onClick(widget);
+                        if (clickableSpan instanceof PostLinkable) {
+                            callback.onPostLinkableClicked((PostLinkable) clickableSpan);
+                        }
                         buffer.removeSpan(BACKGROUND_SPAN);
-                    } else if (action == MotionEvent.ACTION_DOWN && link[0] instanceof PostLinkable) {
-                        buffer.setSpan(BACKGROUND_SPAN, buffer.getSpanStart(link[0]), buffer.getSpanEnd(link[0]), 0);
+                    } else if (action == MotionEvent.ACTION_DOWN && clickableSpan instanceof PostLinkable) {
+                        buffer.setSpan(BACKGROUND_SPAN, buffer.getSpanStart(clickableSpan), buffer.getSpanEnd(clickableSpan), 0);
                     } else if (action == MotionEvent.ACTION_CANCEL) {
                         buffer.removeSpan(BACKGROUND_SPAN);
                     }
@@ -569,6 +543,42 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
         }
     }
 
+    /**
+     * A MovementMethod that searches for PostLinkables.<br>
+     * This version is for the {@link FastTextView}.<br>
+     * See {@link PostLinkable} for more information.
+     */
+    private class PostViewFastMovementMethod implements FastTextViewMovementMethod {
+        @Override
+        public boolean onTouchEvent(@NonNull FastTextView widget, @NonNull Spanned buffer, @NonNull MotionEvent event) {
+            int action = event.getActionMasked();
+
+            if (action == MotionEvent.ACTION_UP) {
+                int x = (int) event.getX();
+                int y = (int) event.getY();
+
+                x -= widget.getPaddingLeft();
+                y -= widget.getPaddingTop();
+
+                x += widget.getScrollX();
+                y += widget.getScrollY();
+
+                Layout layout = widget.getLayout();
+                int line = layout.getLineForVertical(y);
+                int off = layout.getOffsetForHorizontal(line, x);
+
+                ClickableSpan[] link = buffer.getSpans(off, off, ClickableSpan.class);
+
+                if (link.length != 0) {
+                    link[0].onClick(widget);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     private class NoClickableSpan extends ClickableSpan {
         @Override
         public void onClick(View widget) {
@@ -578,6 +588,179 @@ public class PostCell extends LinearLayout implements PostCellInterface, PostLin
         @Override
         public void updateDrawState(TextPaint ds) {
             ds.setUnderlineText(false);
+        }
+    }
+
+    private static Bitmap stickyIcon;
+    private static Bitmap closedIcon;
+    private static Bitmap trashIcon;
+    private static Bitmap archivedIcon;
+
+    static {
+        Resources res = AndroidUtils.getRes();
+        stickyIcon = BitmapFactory.decodeResource(res, R.drawable.sticky_icon);
+        closedIcon = BitmapFactory.decodeResource(res, R.drawable.closed_icon);
+        trashIcon = BitmapFactory.decodeResource(res, R.drawable.trash_icon);
+        archivedIcon = BitmapFactory.decodeResource(res, R.drawable.archived_icon);
+    }
+
+    public static class PostIcons extends View {
+        private static final int STICKY = 0x1;
+        private static final int CLOSED = 0x2;
+        private static final int DELETED = 0x4;
+        private static final int ARCHIVED = 0x8;
+        private static final int COUNTRY = 0x10;
+
+        private int height;
+        private int spacing;
+        private int icons;
+        private int previousIcons;
+        private RectF drawRect = new RectF();
+
+        private Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Rect textRect = new Rect();
+        private ImageLoader.ImageContainer countryIconRequest;
+        private Bitmap countryIcon;
+        private String countryName;
+        private int countryTextColor;
+        private int countryTextSize;
+
+        public PostIcons(Context context) {
+            super(context);
+            init();
+        }
+
+        public PostIcons(Context context, AttributeSet attrs) {
+            super(context, attrs);
+            init();
+        }
+
+        public PostIcons(Context context, AttributeSet attrs, int defStyleAttr) {
+            super(context, attrs, defStyleAttr);
+            init();
+        }
+
+        private void init() {
+            textPaint.setTypeface(Typeface.create((String) null, Typeface.ITALIC));
+            setVisibility(View.GONE);
+        }
+
+        public void setHeight(int height) {
+            this.height = height;
+        }
+
+        public void setSpacing(int spacing) {
+            this.spacing = spacing;
+        }
+
+        public void edit() {
+            previousIcons = icons;
+        }
+
+        public void apply() {
+            if (previousIcons != icons) {
+                if (previousIcons == 0 || icons == 0) {
+                    setVisibility(icons == 0 ? View.GONE : View.VISIBLE);
+                    requestLayout();
+                }
+
+                invalidate();
+            }
+        }
+
+        public void showCountry(final Post post, final Theme theme, int textSize) {
+            countryName = post.countryName;
+            countryTextColor = theme.detailsColor;
+            countryTextSize = textSize;
+
+            countryIconRequest = Chan.getVolleyImageLoader().get(post.countryUrl, new ImageLoader.ImageListener() {
+                @Override
+                public void onResponse(ImageLoader.ImageContainer response, boolean isImmediate) {
+                    if (response.getBitmap() != null) {
+                        countryIcon = response.getBitmap();
+
+                        invalidate();
+                    }
+                }
+
+                @Override
+                public void onErrorResponse(VolleyError error) {
+                }
+            });
+        }
+
+        public void cancelCountryRequest() {
+            if (countryIconRequest != null) {
+                countryIconRequest.cancelRequest();
+                countryIconRequest = null;
+                countryIcon = null;
+                countryName = null;
+                countryTextColor = 0;
+            }
+        }
+
+        public void set(int icon, boolean enable) {
+            if (enable) {
+                icons |= icon;
+            } else {
+                icons &= ~icon;
+            }
+        }
+
+        public boolean get(int icon) {
+            return (icons & icon) == icon;
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int measureHeight = icons == 0 ? 0 : (height + getPaddingTop() + getPaddingBottom());
+
+            setMeasuredDimension(widthMeasureSpec, MeasureSpec.makeMeasureSpec(measureHeight, MeasureSpec.EXACTLY));
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            if (icons != 0) {
+                canvas.save();
+                canvas.translate(getPaddingLeft(), getPaddingTop());
+
+                int offset = 0;
+
+                if (get(STICKY)) {
+                    offset += drawBitmap(canvas, stickyIcon, offset);
+                }
+
+                if (get(CLOSED)) {
+                    offset += drawBitmap(canvas, closedIcon, offset);
+                }
+
+                if (get(DELETED)) {
+                    offset += drawBitmap(canvas, trashIcon, offset);
+                }
+
+                if (get(ARCHIVED)) {
+                    offset += drawBitmap(canvas, archivedIcon, offset);
+                }
+
+                if (get(COUNTRY) && countryIcon != null) {
+                    offset += drawBitmap(canvas, countryIcon, offset);
+
+                    textPaint.setColor(countryTextColor);
+                    textPaint.setTextSize(countryTextSize);
+                    textPaint.getTextBounds(countryName, 0, countryName.length(), textRect);
+                    float y = height / 2f - textRect.exactCenterY();
+                    canvas.drawText(countryName, offset, y, textPaint);
+                }
+
+                canvas.restore();
+            }
+        }
+
+        private int drawBitmap(Canvas canvas, Bitmap bitmap, int offset) {
+            int width = (int) (((float) height / bitmap.getHeight()) * bitmap.getWidth());
+            drawRect.set(offset, 0f, offset + width, height);
+            canvas.drawBitmap(bitmap, null, drawRect, null);
+            return width + spacing;
         }
     }
 }

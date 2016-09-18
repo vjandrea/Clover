@@ -39,6 +39,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <item name="text_color_primary">#DE000000</item>
         <item name="text_color_secondary">#89000000</item>
         <item name="text_color_hint">#42000000</item>
+        <item name="text_color_reveal_spoiler">#ffffffff</item>
 
         <item name="post_name_color">#ff117743</item>
         <item name="post_subject_color">#ff0F0C5D</item>
@@ -56,6 +57,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <item name="post_options_drawable">@drawable/ic_overflow</item>
         <item name="post_saved_reply_color">#FFBCBCBC</item>
         <item name="post_highlighted_color">#FFD6BAD0</item>
+        <item name="post_selected_color">#20000000</item>
 
         <item name="divider_color">#1e000000</item>
         <item name="divider_split_color">#ffe1e1e1</item>
@@ -87,7 +89,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <item name="post_saved_reply_color">#ff5C5C5C</item>
         <item name="post_highlighted_color">#ff444444</item>
         <item name="post_subject_color">#ff625cff</item>
-        <item name="post_details_color">#ff646464</item>
+        <item name="post_details_color">#ffc5c8c6</item>
         <item name="post_link_color">#ff625cff</item>
         <item name="post_spoiler_color">#ff000000</item>
         <item name="post_id_background_light">#00000000</item>
@@ -156,7 +158,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <item name="post_link_color">#ff5F89AC</item>
         <item name="post_highlight_quote_color">#2b435a</item>
         <item name="post_subject_color">#ffb294bb</item>
-        <item name="post_details_color">#ffc5c8c6</item>
         <item name="post_inline_quote_color">#ffb5bd68</item>
 
     </style>
@@ -165,5 +166,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     <style name="ToolbarDropDownListViewStyle" parent="Widget.AppCompat.ListView.DropDown">
         <item name="android:background">#ffffffff</item>
     </style>
+
+    <declare-styleable name="FastTextView">
+        <attr name="textColor" format="color" />
+        <attr name="textSize" format="dimension" />
+        <attr name="singleLine" format="boolean" />
+    </declare-styleable>
 
 </resources>

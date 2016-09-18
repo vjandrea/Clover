@@ -50,8 +50,17 @@ public class ImageSaveTask implements Runnable, FileCache.DownloadedCallback {
     private boolean makeBitmap;
     private Bitmap bitmap;
     private boolean showToast;
+    private String subFolder;
 
     private boolean success = false;
+
+    public void setSubFolder(String boardName) {
+        this.subFolder = boardName;
+    }
+
+    public String getSubFolder() {
+        return subFolder;
+    }
 
     public ImageSaveTask(PostImage postImage) {
         this.postImage = postImage;
@@ -100,27 +109,21 @@ public class ImageSaveTask implements Runnable, FileCache.DownloadedCallback {
     @Override
     public void run() {
         try {
-            Logger.test("Start! " + toString());
-
             if (destination.exists()) {
                 onDestination();
             } else {
                 FileCache.FileCacheDownloader fileCacheDownloader = Chan.getFileCache().downloadFile(postImage.imageUrl, this);
-                // If the fileCacheDownloader is null then the callbacks were already executed here,
-                // else wait for the download to finish to avoid that the next task is immediately executed.
+                // If the fileCacheDownloader is null then the destination already existed and onSuccess() has been called.
+                // Wait otherwise for the download to finish to avoid that the next task is immediately executed.
                 if (fileCacheDownloader != null) {
                     // If the file is now downloading
                     fileCacheDownloader.getFuture().get();
                 }
             }
-
-            Logger.test("End! " + toString());
         } catch (InterruptedException e) {
             onInterrupted();
         } catch (Exception e) {
             Logger.e(TAG, "Uncaught exception", e);
-        } finally {
-            postFinished(success);
         }
     }
 
@@ -130,15 +133,24 @@ public class ImageSaveTask implements Runnable, FileCache.DownloadedCallback {
 
     @Override
     public void onFail(boolean notFound) {
+        postFinished(success);
     }
 
     @Override
     public void onSuccess(File file) {
-        copyToDestination(file);
-        onDestination();
+        if (copyToDestination(file)) {
+            onDestination();
+        } else {
+            deleteDestination();
+        }
+        postFinished(success);
     }
 
     private void onInterrupted() {
+        deleteDestination();
+    }
+
+    private void deleteDestination() {
         if (destination.exists()) {
             if (!destination.delete()) {
                 Logger.e(TAG, "Could not delete destination after an interrupt");
@@ -147,13 +159,16 @@ public class ImageSaveTask implements Runnable, FileCache.DownloadedCallback {
     }
 
     private void onDestination() {
+        success = true;
         scanDestination();
         if (makeBitmap) {
             bitmap = ImageDecoder.decodeFile(destination, dp(512), dp(256));
         }
     }
 
-    private void copyToDestination(File source) {
+    private boolean copyToDestination(File source) {
+        boolean result = false;
+
         InputStream is = null;
         OutputStream os = null;
         try {
@@ -169,13 +184,16 @@ public class ImageSaveTask implements Runnable, FileCache.DownloadedCallback {
             is = new FileInputStream(source);
             os = new FileOutputStream(destination);
             IOUtils.copy(is, os);
+
+            result = true;
         } catch (IOException e) {
             Logger.e(TAG, "Error writing to file", e);
         } finally {
             IOUtils.closeQuietly(is);
             IOUtils.closeQuietly(os);
         }
-        success = true;
+
+        return result;
     }
 
     private void scanDestination() {

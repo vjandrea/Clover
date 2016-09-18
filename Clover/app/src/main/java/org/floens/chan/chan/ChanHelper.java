@@ -20,24 +20,26 @@ package org.floens.chan.chan;
 import android.net.Uri;
 
 import org.floens.chan.Chan;
+import org.floens.chan.core.database.DatabaseLoadableManager;
+import org.floens.chan.core.manager.BoardManager;
 import org.floens.chan.core.model.Loadable;
-import org.floens.chan.core.pool.LoadablePool;
 
 import java.util.List;
 
 public class ChanHelper {
     public static Loadable getLoadableFromStartUri(Uri uri) {
         Loadable loadable = null;
-        int markedNo = -1;
 
         List<String> parts = uri.getPathSegments();
 
         if (parts.size() > 0) {
             String rawBoard = parts.get(0);
-            if (Chan.getBoardManager().getBoardExists(rawBoard)) {
-                if (parts.size() == 1) {
+            BoardManager boardManager = Chan.getBoardManager();
+            DatabaseLoadableManager loadableManager = Chan.getDatabaseManager().getDatabaseLoadableManager();
+            if (boardManager.getBoardExists(rawBoard)) {
+                if (parts.size() == 1 || (parts.size() == 2 && "catalog".equals(parts.get(1)))) {
                     // Board mode
-                    loadable = LoadablePool.getInstance().obtain(new Loadable(rawBoard));
+                    loadable = loadableManager.get(Loadable.forCatalog(rawBoard));
                 } else if (parts.size() >= 3) {
                     // Thread mode
                     int no = -1;
@@ -60,7 +62,7 @@ public class ChanHelper {
                     }
 
                     if (no >= 0) {
-                        loadable = LoadablePool.getInstance().obtain(new Loadable(rawBoard, no));
+                        loadable = loadableManager.get(Loadable.forThread(rawBoard, no));
                         if (post >= 0) {
                             loadable.markedNo = post;
                         }

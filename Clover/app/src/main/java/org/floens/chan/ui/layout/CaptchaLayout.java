@@ -20,7 +20,6 @@ package org.floens.chan.ui.layout;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.net.Uri;
-import android.os.Build;
 import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -32,7 +31,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import org.floens.chan.ChanBuild;
 import org.floens.chan.utils.AndroidUtils;
 import org.floens.chan.utils.IOUtils;
 
@@ -64,6 +62,8 @@ public class CaptchaLayout extends WebView implements CaptchaLayoutInterface {
         this.siteKey = siteKey;
         this.lightTheme = lightTheme;
 
+        AndroidUtils.hideKeyboard(this);
+
         WebSettings settings = getSettings();
         settings.setJavaScriptEnabled(true);
 
@@ -89,25 +89,25 @@ public class CaptchaLayout extends WebView implements CaptchaLayoutInterface {
         setBackgroundColor(0x00000000);
 
         addJavascriptInterface(new CaptchaInterface(this), "CaptchaCallback");
-
-        //noinspection PointlessBooleanExpression
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && ChanBuild.DEVELOPER_MODE) {
-            setWebContentsDebuggingEnabled(true);
-        }
     }
 
     public void reset() {
         if (loaded) {
             loadUrl("javascript:grecaptcha.reset()");
         } else {
-            loaded = true;
-
-            String html = IOUtils.assetAsString(getContext(), "captcha/captcha.html");
-            html = html.replace("__site_key__", siteKey);
-            html = html.replace("__theme__", lightTheme ? "light" : "dark");
-
-            loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null);
+            hardReset();
         }
+    }
+
+    @Override
+    public void hardReset() {
+        loaded = true;
+
+        String html = IOUtils.assetAsString(getContext(), "captcha/captcha.html");
+        html = html.replace("__site_key__", siteKey);
+        html = html.replace("__theme__", lightTheme ? "light" : "dark");
+
+        loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null);
     }
 
     private void onCaptchaLoaded() {

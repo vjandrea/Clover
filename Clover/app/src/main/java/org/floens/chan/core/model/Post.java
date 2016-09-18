@@ -23,12 +23,15 @@ import android.text.TextUtils;
 import org.floens.chan.Chan;
 import org.floens.chan.chan.ChanParser;
 import org.floens.chan.chan.ChanUrls;
+import org.floens.chan.core.settings.ChanSettings;
 import org.jsoup.parser.Parser;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -104,13 +107,11 @@ public class Post {
 
 
     /**
-     * This post replies to the these ids. Is an unmodifiable list after finish().
+     * This post replies to the these ids. Is an unmodifiable set after finish().
      */
-    public List<Integer> repliesTo = new ArrayList<>();
+    public Set<Integer> repliesTo = new TreeSet<>();
 
     public final ArrayList<PostLinkable> linkables = new ArrayList<>();
-
-    public boolean parsedSpans = false;
 
     public SpannableString subjectSpan;
 
@@ -149,16 +150,15 @@ public class Post {
      * @return false if this data is invalid
      */
     public boolean finish() {
-        if (board == null)
+        if (board == null || no < 0 || resto < 0 || date == null || time < 0) {
             return false;
-
-        if (no < 0 || resto < 0 || date == null || time < 0)
-            return false;
+        }
 
         isOP = resto == 0;
 
-        if (isOP && (replies < 0 || images < 0))
+        if (isOP && (replies < 0 || images < 0)) {
             return false;
+        }
 
         if (filename != null && ext != null && imageWidth > 0 && imageHeight > 0 && tim >= 0) {
             hasImage = true;
@@ -166,7 +166,7 @@ public class Post {
             filename = Parser.unescapeEntities(filename, false);
 
             if (spoiler) {
-                Board b = Chan.getBoardManager().getBoardByValue(board);
+                Board b = Chan.getBoardManager().getBoardByCode(board);
                 if (b != null && b.customSpoilers >= 0) {
                     thumbnailUrl = ChanUrls.getCustomSpoilerUrl(board, random.nextInt(b.customSpoilers) + 1);
                 } else {
@@ -183,9 +183,13 @@ public class Post {
             countryUrl = ChanUrls.getCountryFlagUrl(country);
         }
 
+        if (ChanSettings.revealImageSpoilers.get()) {
+            spoiler = false;
+        }
+
         ChanParser.getInstance().parse(this);
 
-        repliesTo = Collections.unmodifiableList(repliesTo);
+        repliesTo = Collections.unmodifiableSet(repliesTo);
 
         return true;
     }

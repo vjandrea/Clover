@@ -17,26 +17,19 @@
  */
 package org.floens.chan.ui.controller;
 
-import android.app.Activity;
 import android.content.Context;
-import android.support.v7.app.AlertDialog;
-import android.view.View;
 import android.widget.LinearLayout;
 
 import org.floens.chan.R;
 import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.activity.StartActivity;
-import org.floens.chan.ui.fragment.FolderPickFragment;
 import org.floens.chan.ui.helper.RefreshUIMessage;
 import org.floens.chan.ui.settings.BooleanSettingView;
 import org.floens.chan.ui.settings.IntegerSettingView;
-import org.floens.chan.ui.settings.LinkSettingView;
 import org.floens.chan.ui.settings.SettingView;
 import org.floens.chan.ui.settings.SettingsController;
 import org.floens.chan.ui.settings.SettingsGroup;
 import org.floens.chan.ui.settings.StringSettingView;
-
-import java.io.File;
 
 import de.greenrobot.event.EventBus;
 
@@ -44,16 +37,10 @@ public class AdvancedSettingsController extends SettingsController {
     private static final String TAG = "AdvancedSettingsController";
 
     private boolean needRestart;
-    private LinkSettingView saveLocation;
     private SettingView newCaptcha;
-    private SettingView forcePhoneLayoutSetting;
     private SettingView enableReplyFab;
-    private SettingView postFullDate;
-    private SettingView postFileInfo;
-    private SettingView postFilename;
-    private SettingView anonymize;
-    private SettingView anonymizeIds;
-    private SettingView tapNoReply;
+    private SettingView neverHideToolbar;
+    private SettingView controllersSwipeable;
 
     public AdvancedSettingsController(Context context) {
         super(context);
@@ -63,7 +50,7 @@ public class AdvancedSettingsController extends SettingsController {
     public void onCreate() {
         super.onCreate();
 
-        navigationItem.title = string(R.string.settings_screen_advanced);
+        navigationItem.setTitle(R.string.settings_screen_advanced);
 
         view = inflateRes(R.layout.settings_layout);
         content = (LinearLayout) view.findViewById(R.id.scrollview_content);
@@ -71,6 +58,8 @@ public class AdvancedSettingsController extends SettingsController {
         populatePreferences();
 
         buildPreferences();
+
+        ChanSettings.settingsOpenCounter.set(5);
     }
 
     @Override
@@ -86,65 +75,42 @@ public class AdvancedSettingsController extends SettingsController {
     public void onPreferenceChange(SettingView item) {
         super.onPreferenceChange(item);
 
-        if (item == forcePhoneLayoutSetting || item == enableReplyFab || item == newCaptcha) {
+        if (item == enableReplyFab || item == newCaptcha || item == neverHideToolbar || item == controllersSwipeable) {
             needRestart = true;
-        }
-
-        if (item == postFullDate || item == postFileInfo || item == anonymize || item == anonymizeIds || item == tapNoReply || item == postFilename) {
+        } else {
             EventBus.getDefault().post(new RefreshUIMessage("postui"));
         }
     }
 
     private void populatePreferences() {
-        SettingsGroup settings = new SettingsGroup(string(R.string.settings_group_advanced));
+        SettingsGroup settings = new SettingsGroup(R.string.settings_group_advanced);
 
-        // TODO change this to a presenting controller
-        saveLocation = (LinkSettingView) settings.add(new LinkSettingView(this, string(R.string.setting_save_folder), null, new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                File dir = new File(ChanSettings.saveLocation.get());
-                if (!dir.mkdirs() && !dir.isDirectory()) {
-                    new AlertDialog.Builder(context).setMessage(R.string.setting_save_folder_error_create_folder).show();
-                } else {
-                    FolderPickFragment frag = FolderPickFragment.newInstance(new FolderPickFragment.FolderPickListener() {
-                        @Override
-                        public void folderPicked(File path) {
-                            ChanSettings.saveLocation.set(path.getAbsolutePath());
-                            setSaveLocationDescription();
-                        }
-                    }, dir);
-                    ((Activity) context).getFragmentManager().beginTransaction().add(frag, null).commit();
-                }
-            }
-        }));
-        setSaveLocationDescription();
-
-        newCaptcha = settings.add(new BooleanSettingView(this, ChanSettings.postNewCaptcha, string(R.string.setting_use_new_captcha), string(R.string.setting_use_new_captcha_description)));
-        settings.add(new BooleanSettingView(this, ChanSettings.saveOriginalFilename, string(R.string.setting_save_original_filename), null));
-        settings.add(new BooleanSettingView(this, ChanSettings.shareUrl, string(R.string.setting_share_url), string(R.string.setting_share_url_description)));
-        settings.add(new BooleanSettingView(this, ChanSettings.networkHttps, string(R.string.setting_network_https), string(R.string.setting_network_https_description)));
-        forcePhoneLayoutSetting = settings.add(new BooleanSettingView(this, ChanSettings.forcePhoneLayout, string(R.string.setting_force_phone_layout), null));
-        enableReplyFab = settings.add(new BooleanSettingView(this, ChanSettings.enableReplyFab, string(R.string.setting_enable_reply_fab), string(R.string.setting_enable_reply_fab_description)));
-        anonymize = settings.add(new BooleanSettingView(this, ChanSettings.anonymize, string(R.string.setting_anonymize), null));
-        anonymizeIds = settings.add(new BooleanSettingView(this, ChanSettings.anonymizeIds, string(R.string.setting_anonymize_ids), null));
-        settings.add(new BooleanSettingView(this, ChanSettings.repliesButtonsBottom, string(R.string.setting_buttons_bottom), null));
-        settings.add(new BooleanSettingView(this, ChanSettings.confirmExit, string(R.string.setting_confirm_exit), null));
-        tapNoReply = settings.add(new BooleanSettingView(this, ChanSettings.tapNoReply, string(R.string.setting_tap_no_rely), null));
-        settings.add(new BooleanSettingView(this, ChanSettings.volumeKeysScrolling, string(R.string.setting_volume_key_scrolling), null));
-        postFullDate = settings.add(new BooleanSettingView(this, ChanSettings.postFullDate, string(R.string.setting_post_full_date), null));
-        postFileInfo = settings.add(new BooleanSettingView(this, ChanSettings.postFileInfo, string(R.string.setting_post_file_info), null));
-        postFilename = settings.add(new BooleanSettingView(this, ChanSettings.postFilename, string(R.string.setting_post_filename), null));
+        newCaptcha = settings.add(new BooleanSettingView(this, ChanSettings.postNewCaptcha, R.string.setting_use_new_captcha, R.string.setting_use_new_captcha_description));
+        settings.add(new BooleanSettingView(this, ChanSettings.saveOriginalFilename, R.string.setting_save_original_filename, 0));
+        controllersSwipeable = settings.add(new BooleanSettingView(this, ChanSettings.controllerSwipeable, R.string.setting_controller_swipeable, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.shareUrl, R.string.setting_share_url, R.string.setting_share_url_description));
+        settings.add(new BooleanSettingView(this, ChanSettings.networkHttps, R.string.setting_network_https, R.string.setting_network_https_description));
+        enableReplyFab = settings.add(new BooleanSettingView(this, ChanSettings.enableReplyFab, R.string.setting_enable_reply_fab, R.string.setting_enable_reply_fab_description));
+        settings.add(new BooleanSettingView(this, ChanSettings.anonymize, R.string.setting_anonymize, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.anonymizeIds, R.string.setting_anonymize_ids, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.showAnonymousName, R.string.setting_show_anonymous_name, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.revealImageSpoilers, R.string.settings_reveal_image_spoilers, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.revealTextSpoilers, R.string.settings_reveal_text_spoilers, R.string.settings_reveal_text_spoilers_description));
+        settings.add(new BooleanSettingView(this, ChanSettings.repliesButtonsBottom, R.string.setting_buttons_bottom, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.confirmExit, R.string.setting_confirm_exit, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.tapNoReply, R.string.setting_tap_no_rely, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.volumeKeysScrolling, R.string.setting_volume_key_scrolling, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.postFullDate, R.string.setting_post_full_date, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.postFileInfo, R.string.setting_post_file_info, 0));
+        settings.add(new BooleanSettingView(this, ChanSettings.postFilename, R.string.setting_post_filename, 0));
+        neverHideToolbar = settings.add(new BooleanSettingView(this, ChanSettings.neverHideToolbar, R.string.setting_never_hide_toolbar, 0));
 
         groups.add(settings);
 
-        SettingsGroup proxy = new SettingsGroup(string(R.string.settings_group_proxy));
-        proxy.add(new BooleanSettingView(this, ChanSettings.proxyEnabled, string(R.string.setting_proxy_enabled), null));
-        proxy.add(new StringSettingView(this, ChanSettings.proxyAddress, string(R.string.setting_proxy_address), string(R.string.setting_proxy_address)));
-        proxy.add(new IntegerSettingView(this, ChanSettings.proxyPort, string(R.string.setting_proxy_port), string(R.string.setting_proxy_port)));
+        SettingsGroup proxy = new SettingsGroup(R.string.settings_group_proxy);
+        proxy.add(new BooleanSettingView(this, ChanSettings.proxyEnabled, R.string.setting_proxy_enabled, 0));
+        proxy.add(new StringSettingView(this, ChanSettings.proxyAddress, R.string.setting_proxy_address, R.string.setting_proxy_address));
+        proxy.add(new IntegerSettingView(this, ChanSettings.proxyPort, R.string.setting_proxy_port, R.string.setting_proxy_port));
         groups.add(proxy);
-    }
-
-    private void setSaveLocationDescription() {
-        saveLocation.setDescription(ChanSettings.saveLocation.get());
     }
 }

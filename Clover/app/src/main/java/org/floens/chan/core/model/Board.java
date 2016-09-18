@@ -17,6 +17,8 @@
  */
 package org.floens.chan.core.model;
 
+import android.text.TextUtils;
+
 import com.j256.ormlite.field.DatabaseField;
 import com.j256.ormlite.table.DatabaseTable;
 
@@ -25,9 +27,9 @@ public class Board {
     public Board() {
     }
 
-    public Board(String key, String value, boolean saved, boolean workSafe) {
-        this.key = key;
-        this.value = value;
+    public Board(String name, String code, boolean saved, boolean workSafe) {
+        this.name = name;
+        this.code = code;
         this.saved = saved;
         this.workSafe = workSafe;
     }
@@ -35,17 +37,13 @@ public class Board {
     @DatabaseField(generatedId = true)
     public int id;
 
-    /**
-     * Name of the board, e.g. Literature
-     */
-    @DatabaseField
-    public String key;
+    // named key for legacy support
+    @DatabaseField(columnName = "key")
+    public String name;
 
-    /**
-     * Name of the url, e.g. lit
-     */
-    @DatabaseField
-    public String value;
+    // named value for legacy support
+    @DatabaseField(columnName = "value")
+    public String code;
 
     /**
      * True if this board appears in the dropdown, false otherwise.
@@ -113,9 +111,7 @@ public class Board {
     @DatabaseField
     public boolean countryFlags = false;
 
-    /**
-     * Not used anymore.
-     */
+    @Deprecated
     @DatabaseField
     public boolean trollFlags = false;
 
@@ -126,18 +122,20 @@ public class Board {
     public String description;
 
     public boolean finish() {
-        if (key == null || value == null || perPage < 0 || pages < 0)
+        if (TextUtils.isEmpty(name) || TextUtils.isEmpty(code) || perPage < 0 || pages < 0)
             return false;
 
-        // Also filters out /f/, it can't be viewed anyway
-        if (cooldownThreads < 0 || cooldownReplies < 0 || cooldownImages < 0 || cooldownRepliesIntra < 0 || cooldownImagesIntra < 0)
+        if (cooldownThreads < 0 || cooldownReplies < 0 || cooldownImages < 0 || cooldownRepliesIntra < 0 || cooldownImagesIntra < 0) {
             return false;
+        }
 
         return true;
     }
 
     @Override
     public String toString() {
-        return key;
+        return name;
     }
+
+
 }

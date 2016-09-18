@@ -17,10 +17,10 @@
  */
 package org.floens.chan.utils;
 
-import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -39,13 +39,12 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.preference.PreferenceManager;
+import android.support.customtabs.CustomTabsIntent;
 import android.support.design.widget.Snackbar;
-import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.inputmethod.InputMethodManager;
-import android.webkit.WebView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -57,17 +56,23 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 
+import static org.floens.chan.ui.theme.ThemeHelper.theme;
+
 public class AndroidUtils {
+    private static final String TAG = "AndroidUtils";
+
     private static HashMap<String, Typeface> typefaceCache = new HashMap<>();
 
     public static Typeface ROBOTO_MEDIUM;
     public static Typeface ROBOTO_MEDIUM_ITALIC;
+    public static Typeface ROBOTO_CONDENSED_REGULAR;
 
     private static ConnectivityManager connectivityManager;
 
     public static void init() {
         ROBOTO_MEDIUM = getTypeface("Roboto-Medium.ttf");
         ROBOTO_MEDIUM_ITALIC = getTypeface("Roboto-MediumItalic.ttf");
+        ROBOTO_CONDENSED_REGULAR = getTypeface("RobotoCondensed-Regular.ttf");
 
         connectivityManager = (ConnectivityManager) getAppContext().getSystemService(Context.CONNECTIVITY_SERVICE);
     }
@@ -86,18 +91,6 @@ public class AndroidUtils {
 
     public static SharedPreferences getPreferences() {
         return PreferenceManager.getDefaultSharedPreferences(Chan.con);
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    public static void openWebView(Activity activity, String title, String link) {
-        Dialog dialog = new Dialog(activity);
-        dialog.setContentView(R.layout.dialog_web);
-        WebView wb = (WebView) dialog.findViewById(R.id.web_view);
-        wb.getSettings().setJavaScriptEnabled(true);
-        wb.loadUrl(link);
-        dialog.setTitle(title);
-        dialog.setCancelable(true);
-        dialog.show();
     }
 
     /**
@@ -140,6 +133,34 @@ public class AndroidUtils {
                     openIntentFailed();
                 }
             }
+        }
+    }
+
+    public static void openLinkInBrowser(Activity activity, String link) {
+        // Hack that's sort of the same as openLink
+        // The link won't be opened in a custom tab if this app is the default handler for that link.
+        // Manually check if this app opens it instead of a custom tab, and use the logic of
+        // openLink to avoid that and show a chooser instead.
+        boolean openWithCustomTabs = true;
+        Intent urlIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(link));
+        PackageManager pm = getAppContext().getPackageManager();
+        ComponentName resolvedActivity = urlIntent.resolveActivity(pm);
+        if (resolvedActivity != null) {
+            openWithCustomTabs = !resolvedActivity.getPackageName().equals(getAppContext().getPackageName());
+        }
+
+        if (openWithCustomTabs) {
+            CustomTabsIntent tabsIntent = new CustomTabsIntent.Builder()
+                    .setToolbarColor(theme().primaryColor.color)
+                    .build();
+            try {
+                tabsIntent.launchUrl(activity, Uri.parse(link));
+            } catch (ActivityNotFoundException e) {
+                // Can't check it beforehand so catch the exception
+                openIntentFailed();
+            }
+        } else {
+            openLink(link);
         }
     }
 
@@ -252,43 +273,85 @@ public class AndroidUtils {
     }
 
     public interface OnMeasuredCallback {
+        /**
+         * Called when the layout is done.
+         *
+         * @param view same view as the argument.
+         * @return true to continue with rendering, false to cancel and redo the layout.
+         */
         boolean onMeasured(View view);
     }
 
     /**
      * Waits for a measure. Calls callback immediately if the view width and height are more than 0.
-     * Otherwise it registers an onpredrawlistener and rechedules a layout.
-     * Warning: the view you give must be attached to the view root!!!
+     * Otherwise it registers an onpredrawlistener.
+     * <b>Warning: the view you give must be attached to the view root!</b>
      */
     public static void waitForMeasure(final View view, final OnMeasuredCallback callback) {
-        waitForMeasure(true, view, callback);
+        if (view.getWindowToken() == null) {
+            // If you call getViewTreeObserver on a view when it's not attached to a window will result in the creation of a temporarily viewtreeobserver.
+            // This is almost always not what you want.
+            throw new IllegalArgumentException("The view given to waitForMeasure is not attached to the window and does not have a ViewTreeObserver.");
+        }
+
+        waitForLayoutInternal(true, view.getViewTreeObserver(), view, callback);
     }
 
+    /**
+     * Always registers an onpredrawlistener.
+     * <b>Warning: the view you give must be attached to the view root!</b>
+     */
     public static void waitForLayout(final View view, final OnMeasuredCallback callback) {
-        waitForMeasure(false, view, callback);
+        if (view.getWindowToken() == null) {
+            // See comment above
+            throw new IllegalArgumentException("The view given to waitForLayout is not attached to the window and does not have a ViewTreeObserver.");
+        }
+
+        waitForLayoutInternal(false, view.getViewTreeObserver(), view, callback);
     }
 
-    private static void waitForMeasure(boolean returnIfNotZero, final View view, final OnMeasuredCallback callback) {
+    /**
+     * Always registers an onpredrawlistener. The given ViewTreeObserver will be used.
+     */
+    public static void waitForLayout(final ViewTreeObserver viewTreeObserver, final View view, final OnMeasuredCallback callback) {
+        waitForLayoutInternal(false, viewTreeObserver, view, callback);
+    }
+
+    private static void waitForLayoutInternal(boolean returnIfNotZero, final ViewTreeObserver viewTreeObserver, final View view, final OnMeasuredCallback callback) {
         int width = view.getWidth();
         int height = view.getHeight();
 
         if (returnIfNotZero && width > 0 && height > 0) {
             callback.onMeasured(view);
         } else {
-            view.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            Logger.d(TAG, "Adding OnPreDrawListener to ViewTreeObserver");
+            viewTreeObserver.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
                 @Override
                 public boolean onPreDraw() {
-                    final ViewTreeObserver observer = view.getViewTreeObserver();
-                    if (observer.isAlive()) {
-                        observer.removeOnPreDrawListener(this);
+                    Logger.d(TAG, "OnPreDraw callback");
+
+                    ViewTreeObserver usingViewTreeObserver = viewTreeObserver;
+                    if (viewTreeObserver != view.getViewTreeObserver()) {
+                        Logger.e(TAG, "view.getViewTreeObserver() is another viewtreeobserver! replacing with the new one");
+                        usingViewTreeObserver = view.getViewTreeObserver();
+                    }
+
+                    if (usingViewTreeObserver.isAlive()) {
+                        usingViewTreeObserver.removeOnPreDrawListener(this);
+                    } else {
+                        Logger.e(TAG, "ViewTreeObserver not alive, could not remove onPreDrawListener! This will probably not end well");
                     }
 
                     boolean ret;
                     try {
                         ret = callback.onMeasured(view);
                     } catch (Exception e) {
-                        Log.i("AndroidUtils", "Exception in onMeasured", e);
+                        Logger.i(TAG, "Exception in onMeasured", e);
                         throw e;
+                    }
+
+                    if (!ret) {
+                        Logger.d(TAG, "waitForLayout requested a re-layout by returning false");
                     }
 
                     return ret;
@@ -323,7 +386,7 @@ public class AndroidUtils {
     }
 
     public static boolean removeFromParentView(View view) {
-        if (view.getParent() instanceof ViewGroup) {
+        if (view.getParent() instanceof ViewGroup && ((ViewGroup) view.getParent()).indexOfChild(view) >= 0) {
             ((ViewGroup) view.getParent()).removeView(view);
             return true;
         } else {

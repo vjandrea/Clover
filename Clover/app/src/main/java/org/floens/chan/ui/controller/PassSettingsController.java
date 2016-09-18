@@ -36,6 +36,8 @@ import org.floens.chan.ui.view.CrossfadeView;
 import org.floens.chan.utils.AndroidUtils;
 import org.floens.chan.utils.AnimationUtils;
 
+import static org.floens.chan.utils.AndroidUtils.getString;
+
 public class PassSettingsController extends Controller implements View.OnClickListener, ReplyManager.HttpCallback<PassHttpCall> {
     private LinearLayout container;
     private CrossfadeView crossfadeView;
@@ -54,7 +56,7 @@ public class PassSettingsController extends Controller implements View.OnClickLi
     public void onCreate() {
         super.onCreate();
 
-        navigationItem.title = string(R.string.settings_screen_pass);
+        navigationItem.setTitle(R.string.settings_screen_pass);
 
         view = inflateRes(R.layout.controller_pass);
         container = (LinearLayout) view.findViewById(R.id.container);
@@ -72,19 +74,25 @@ public class PassSettingsController extends Controller implements View.OnClickLi
         button.setText(loggedIn ? R.string.setting_pass_logout : R.string.setting_pass_login);
         button.setOnClickListener(this);
 
-        bottomDescription.setText(Html.fromHtml(string(R.string.setting_pass_bottom_description)));
+        bottomDescription.setText(Html.fromHtml(getString(R.string.setting_pass_bottom_description)));
         bottomDescription.setMovementMethod(LinkMovementMethod.getInstance());
 
         inputToken.setText(ChanSettings.passToken.get());
         inputPin.setText(ChanSettings.passPin.get());
 
-        AndroidUtils.waitForLayout(view, new AndroidUtils.OnMeasuredCallback() {
+        // Sanity check
+        if (parentController.view.getWindowToken() == null) {
+            throw new IllegalArgumentException("parentController.view not attached");
+        }
+
+        // TODO: remove
+        AndroidUtils.waitForLayout(parentController.view.getViewTreeObserver(), view, new AndroidUtils.OnMeasuredCallback() {
             @Override
             public boolean onMeasured(View view) {
                 crossfadeView.getLayoutParams().height = crossfadeView.getHeight();
                 crossfadeView.requestLayout();
                 crossfadeView.toggle(!loggedIn, false);
-                return true;
+                return false;
             }
         });
     }
@@ -131,7 +139,7 @@ public class PassSettingsController extends Controller implements View.OnClickLi
 
     private void authFail(PassHttpCall httpPost) {
         if (httpPost.message == null) {
-            httpPost.message = string(R.string.setting_pass_error);
+            httpPost.message = getString(R.string.setting_pass_error);
         }
 
         showError(httpPost.message);

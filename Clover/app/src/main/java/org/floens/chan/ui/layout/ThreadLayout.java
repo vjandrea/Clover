@@ -17,6 +17,8 @@
  */
 package org.floens.chan.ui.layout;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.ProgressDialog;
@@ -25,7 +27,6 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.support.design.widget.CoordinatorLayout;
-import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v7.app.AlertDialog;
 import android.util.AttributeSet;
@@ -39,17 +40,11 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.android.volley.AuthFailureError;
-import com.android.volley.NetworkError;
-import com.android.volley.ParseError;
-import com.android.volley.ServerError;
-import com.android.volley.TimeoutError;
-import com.android.volley.VolleyError;
-
 import org.floens.chan.Chan;
 import org.floens.chan.R;
 import org.floens.chan.controller.Controller;
 import org.floens.chan.core.database.DatabaseManager;
+import org.floens.chan.core.exception.ChanLoaderException;
 import org.floens.chan.core.model.ChanThread;
 import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.Post;
@@ -59,17 +54,16 @@ import org.floens.chan.core.model.ThreadHide;
 import org.floens.chan.core.presenter.ThreadPresenter;
 import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.adapter.PostsFilter;
-import org.floens.chan.ui.cell.PostCellInterface;
 import org.floens.chan.ui.helper.PostPopupHelper;
 import org.floens.chan.ui.toolbar.Toolbar;
+import org.floens.chan.ui.view.HidingFloatingActionButton;
 import org.floens.chan.ui.view.LoadView;
 import org.floens.chan.ui.view.ThumbnailView;
 import org.floens.chan.utils.AndroidUtils;
 
 import java.util.List;
 
-import javax.net.ssl.SSLException;
-
+import static org.floens.chan.ui.theme.ThemeHelper.theme;
 import static org.floens.chan.utils.AndroidUtils.fixSnackbarText;
 import static org.floens.chan.utils.AndroidUtils.getString;
 
@@ -90,7 +84,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     private ThreadPresenter presenter;
 
     private LoadView loadView;
-    private FloatingActionButton replyButton;
+    private HidingFloatingActionButton replyButton;
     private ThreadListLayout threadListLayout;
     private LinearLayout errorLayout;
 
@@ -124,10 +118,8 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
 
         presenter = new ThreadPresenter(this);
 
-
         loadView = (LoadView) findViewById(R.id.loadview);
-        replyButton = (FloatingActionButton) findViewById(R.id.reply_button);
-        replyButton.setOnClickListener(this);
+        replyButton = (HidingFloatingActionButton) findViewById(R.id.reply_button);
 
         threadListLayout = (ThreadListLayout) LayoutInflater.from(getContext()).inflate(R.layout.layout_thread_list, this, false);
         threadListLayout.setCallbacks(presenter, presenter, presenter, presenter, this);
@@ -144,6 +136,10 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
         replyButtonEnabled = ChanSettings.enableReplyFab.get();
         if (!replyButtonEnabled) {
             AndroidUtils.removeFromParentView(replyButton);
+        } else {
+            replyButton.setOnClickListener(this);
+            replyButton.setToolbar(callback.getToolbar());
+            theme().applyFabColor(replyButton);
         }
 
         switchVisible(Visible.LOADING);
@@ -183,7 +179,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
         presenter.requestData();
     }
 
-    public void setPostViewMode(PostCellInterface.PostViewMode postViewMode) {
+    public void setPostViewMode(ChanSettings.PostViewMode postViewMode) {
         threadListLayout.setPostViewMode(postViewMode);
     }
 
@@ -195,6 +191,11 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     @Override
     public Toolbar getToolbar() {
         return callback.getToolbar();
+    }
+
+    @Override
+    public boolean shouldToolbarCollapse() {
+        return callback.shouldToolbarCollapse();
     }
 
     @Override
@@ -212,17 +213,8 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     }
 
     @Override
-    public void showError(VolleyError error) {
-        String errorMessage;
-        if (error.getCause() instanceof SSLException) {
-            errorMessage = getContext().getString(R.string.thread_load_failed_ssl);
-        } else if (error instanceof NetworkError || error instanceof TimeoutError || error instanceof ParseError || error instanceof AuthFailureError) {
-            errorMessage = getContext().getString(R.string.thread_load_failed_network);
-        } else if (error instanceof ServerError) {
-            errorMessage = getContext().getString(R.string.thread_load_failed_server);
-        } else {
-            errorMessage = getContext().getString(R.string.thread_load_failed_parsing);
-        }
+    public void showError(ChanLoaderException error) {
+        String errorMessage = getString(error.getErrorMessage());
 
         if (visible == Visible.THREAD) {
             threadListLayout.showError(errorMessage);
@@ -276,20 +268,20 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
                     .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialog, int which) {
-                            AndroidUtils.openLink(link);
+                            AndroidUtils.openLinkInBrowser((Activity) getContext(), link);
                         }
                     })
                     .setTitle(R.string.open_link_confirmation)
                     .setMessage(link)
                     .show();
         } else {
-            AndroidUtils.openLink(link);
+            AndroidUtils.openLinkInBrowser((Activity) getContext(), link);
         }
     }
 
     @Override
-    public void openWebView(String title, String link) {
-        AndroidUtils.openWebView((Activity) getContext(), title, link);
+    public void openReportView(Post post) {
+        callback.openReportController(post);
     }
 
     @Override
@@ -302,8 +294,22 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     }
 
     @Override
+    public void hidePostsPopup() {
+        postPopupHelper.popAll();
+    }
+
+    @Override
     public List<Post> getDisplayingPosts() {
-        return threadListLayout.getDisplayingPosts();
+        if (postPopupHelper.isOpen()) {
+            return postPopupHelper.getDisplayingPosts();
+        } else {
+            return threadListLayout.getDisplayingPosts();
+        }
+    }
+
+    @Override
+    public int[] getCurrentPosition() {
+        return threadListLayout.getIndexAndTop();
     }
 
     @Override
@@ -312,8 +318,17 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     }
 
     @Override
+    public void showAlbum(List<PostImage> images, int index) {
+        callback.showAlbum(images, index);
+    }
+
+    @Override
     public void scrollTo(int displayPosition, boolean smooth) {
-        threadListLayout.scrollTo(displayPosition, smooth);
+        if (postPopupHelper.isOpen()) {
+            postPopupHelper.scrollTo(displayPosition, smooth);
+        } else if (visible == Visible.THREAD) {
+            threadListLayout.scrollTo(displayPosition, smooth);
+        }
     }
 
     @Override
@@ -329,6 +344,16 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
     @Override
     public void highlightPostTripcode(String tripcode) {
         threadListLayout.highlightPostTripcode(tripcode);
+    }
+
+    @Override
+    public void filterPostTripcode(String tripcode) {
+        callback.openFilterForTripcode(tripcode);
+    }
+
+    @Override
+    public void selectPost(int post) {
+        threadListLayout.selectPost(post);
     }
 
     @Override
@@ -412,6 +437,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
                 newPostsNotification.setAction(R.string.thread_new_posts_goto, new OnClickListener() {
                     @Override
                     public void onClick(View v) {
+                        newPostsNotification = null;
                         presenter.scrollTo(-1, true);
                     }
                 }).show();
@@ -441,7 +467,7 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
         threadListLayout.openReply(open);
     }
 
-    private void showReplyButton(boolean show) {
+    private void showReplyButton(final boolean show) {
         if (show != showingReplyButton && replyButtonEnabled) {
             showingReplyButton = show;
 
@@ -452,6 +478,14 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
                     .alpha(show ? 1f : 0f)
                     .scaleX(show ? 1f : 0f)
                     .scaleY(show ? 1f : 0f)
+                    .setListener(new AnimatorListenerAdapter() {
+                        @Override
+                        public void onAnimationCancel(Animator animation) {
+                            replyButton.setAlpha(show ? 1f : 0f);
+                            replyButton.setScaleX(show ? 1f : 0f);
+                            replyButton.setScaleY(show ? 1f : 0f);
+                        }
+                    })
                     .start();
         }
     }
@@ -507,12 +541,20 @@ public class ThreadLayout extends CoordinatorLayout implements ThreadPresenter.T
 
         void showImages(List<PostImage> images, int index, Loadable loadable, ThumbnailView thumbnail);
 
+        void showAlbum(List<PostImage> images, int index);
+
         void onShowPosts();
 
         void presentRepliesController(Controller controller);
 
+        void openReportController(Post post);
+
         void hideSwipeRefreshLayout();
 
         Toolbar getToolbar();
+
+        boolean shouldToolbarCollapse();
+
+        void openFilterForTripcode(String tripcode);
     }
 }

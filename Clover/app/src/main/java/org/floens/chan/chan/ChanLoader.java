@@ -24,6 +24,8 @@ import com.android.volley.Response;
 import com.android.volley.VolleyError;
 
 import org.floens.chan.Chan;
+import org.floens.chan.core.database.DatabaseManager;
+import org.floens.chan.core.exception.ChanLoaderException;
 import org.floens.chan.core.model.ChanThread;
 import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.Post;
@@ -49,11 +51,12 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     private final List<ChanLoaderCallback> listeners = new ArrayList<>();
     private final Loadable loadable;
     private final RequestQueue volleyRequestQueue;
+    private final DatabaseManager databaseManager;
     private ChanThread thread;
 
     private ChanReaderRequest request;
 
-    private int currentTimeout = -1;
+    private int currentTimeout = 0;
     private int lastPostCount;
     private long lastLoadTime;
     private ScheduledFuture<?> pendingFuture;
@@ -66,6 +69,7 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
         }
 
         volleyRequestQueue = Chan.getVolleyRequestQueue();
+        databaseManager = Chan.getDatabaseManager();
     }
 
     /**
@@ -122,24 +126,25 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
 
     /**
      * Request more data
+     *
+     * @return true if a request was started, false otherwise
      */
-    public void requestMoreData() {
+    public boolean requestMoreData() {
         clearPendingRunnable();
 
         if (loadable.isThreadMode() && request == null) {
             request = getData();
+            return true;
+        } else {
+            return false;
         }
     }
 
     /**
-     * Request more data if the time left is below 0 If auto load more is
-     * disabled, this needs to be called manually. Otherwise this is called
-     * automatically when the timer hits 0.
+     * Request more data if {@link #getTimeUntilLoadMore()} is negative.
      */
-    public void loadMoreIfTime() {
-        if (getTimeUntilLoadMore() < 0L) {
-            requestMoreData();
-        }
+    public boolean loadMoreIfTime() {
+        return getTimeUntilLoadMore() < 0L && requestMoreData();
     }
 
     public void quickLoad() {
@@ -207,7 +212,7 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
         processResponse(response);
 
         if (TextUtils.isEmpty(loadable.title)) {
-            loadable.title = PostHelper.getTitle(thread.op, loadable);
+            loadable.setTitle(PostHelper.getTitle(thread.op, loadable));
         }
 
         for (Post post : thread.posts) {
@@ -215,6 +220,14 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
         }
 
         lastLoadTime = Time.get();
+
+        int postCount = thread.posts.size();
+        if (postCount > lastPostCount) {
+            lastPostCount = postCount;
+            currentTimeout = 0;
+        } else {
+            currentTimeout = Math.min(currentTimeout + 1, watchTimeouts.length - 1);
+        }
 
         for (ChanLoaderCallback l : listeners) {
             l.onChanLoaderData(thread);
@@ -229,8 +242,10 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
 
         clearTimer();
 
+        ChanLoaderException loaderException = new ChanLoaderException(error);
+
         for (ChanLoaderCallback l : listeners) {
-            l.onChanLoaderError(error);
+            l.onChanLoaderError(loaderException);
         }
     }
 
@@ -262,15 +277,6 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     public void setTimer() {
         clearPendingRunnable();
 
-        int postCount = thread == null ? 0 : thread.posts.size();
-        if (postCount > lastPostCount) {
-            lastPostCount = postCount;
-            currentTimeout = 0;
-        } else {
-            currentTimeout++;
-            currentTimeout = Math.min(currentTimeout, watchTimeouts.length - 1);
-        }
-
         int watchTimeout = watchTimeouts[currentTimeout];
         Logger.d(TAG, "Scheduled reload in " + watchTimeout + "s");
 
@@ -289,7 +295,7 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     }
 
     public void clearTimer() {
-        currentTimeout = -1;
+        currentTimeout = 0;
         clearPendingRunnable();
     }
 
@@ -315,6 +321,6 @@ public class ChanLoader implements Response.ErrorListener, Response.Listener<Cha
     public interface ChanLoaderCallback {
         void onChanLoaderData(ChanThread result);
 
-        void onChanLoaderError(VolleyError error);
+        void onChanLoaderError(ChanLoaderException error);
     }
 }

@@ -22,15 +22,12 @@ import android.text.TextPaint;
 import android.text.style.ClickableSpan;
 import android.view.View;
 
+import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.cell.PostCell;
 import org.floens.chan.ui.theme.Theme;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * A Clickable span that handles post clicks. These are created in ChanParser for post quotes, spoilers etc.<br>
- * PostCells bind callbacks with addCallback and call removeCallback when done.<br>
  * PostCell has a {@link PostCell.PostViewMovementMethod}, that searches spans at the location the TextView was tapped,
  * and handled if it was a PostLinkable.
  */
@@ -45,11 +42,8 @@ public class PostLinkable extends ClickableSpan {
     public final Object value;
     public final Type type;
 
-    private List<Callback> callbacks = new ArrayList<>();
-    private boolean spoilerVisible = false;
-
-//    private static boolean testingCallbacks = false;
-//    private static HashMap<PostLinkable, List<Callback>> callbacksTest = new HashMap<>();
+    private boolean spoilerVisible = ChanSettings.revealTextSpoilers.get();
+    private int markedNo = -1;
 
     public PostLinkable(Theme theme, Post post, String key, Object value, Type type) {
         this.theme = theme;
@@ -57,63 +51,22 @@ public class PostLinkable extends ClickableSpan {
         this.key = key;
         this.value = value;
         this.type = type;
-
-        /*if (!testingCallbacks) {
-            testingCallbacks = true;
-
-            AndroidUtils.runOnUiThread(testCallbacksRunnable, 1000);
-        }*/
-    }
-
-    /*private static Runnable testCallbacksRunnable = new Runnable() {
-        @Override
-        public void run() {
-            AndroidUtils.runOnUiThread(testCallbacksRunnable, 1000);
-
-            Logger.test("Callbacks:");
-            for (Map.Entry<PostLinkable, List<Callback>> entry : callbacksTest.entrySet()) {
-                if (entry.getValue().size() > 0) {
-                    Logger.test(entry.getKey().key + " still has " + entry.getValue().size() + " bounded callbacks");
-                }
-            }
-        }
-    };*/
-
-    public void addCallback(Callback callback) {
-        callbacks.add(callback);
-
-        /*if (!callbacksTest.containsKey(this)) {
-            callbacksTest.put(this, new ArrayList<Callback>());
-        }
-
-        callbacksTest.get(this).add(callback);*/
-    }
-
-    public void removeCallback(Callback callback) {
-        callbacks.remove(callback);
-
-        /*callbacksTest.get(this).remove(callback);*/
-    }
-
-    public boolean hasCallback(Callback callback) {
-        return callbacks.contains(callback);
     }
 
     @Override
     public void onClick(View widget) {
-        Callback top = topCallback();
-        if (top != null) {
-            top.onLinkableClick(this);
-        }
         spoilerVisible = !spoilerVisible;
+    }
+
+    public void setMarkedNo(int markedNo) {
+        this.markedNo = markedNo;
     }
 
     @Override
     public void updateDrawState(@NonNull TextPaint ds) {
         if (type == Type.QUOTE || type == Type.LINK || type == Type.THREAD) {
             if (type == Type.QUOTE) {
-                Callback top = topCallback();
-                if (value instanceof Integer && top != null && (Integer) value == top.getMarkedNo(this)) {
+                if (value instanceof Integer && ((int) value) == markedNo) {
                     ds.setColor(theme.highlightQuoteColor);
                 } else {
                     ds.setColor(theme.quoteColor);
@@ -126,16 +79,14 @@ public class PostLinkable extends ClickableSpan {
 
             ds.setUnderlineText(true);
         } else if (type == Type.SPOILER) {
+            ds.bgColor = theme.spoilerColor;
+            ds.setUnderlineText(false);
             if (!spoilerVisible) {
                 ds.setColor(theme.spoilerColor);
-                ds.bgColor = theme.spoilerColor;
-                ds.setUnderlineText(false);
+            } else {
+                ds.setColor(theme.textColorRevealSpoiler);
             }
         }
-    }
-
-    private Callback topCallback() {
-        return callbacks.size() > 0 ? callbacks.get(callbacks.size() - 1) : null;
     }
 
     public static class ThreadLink {
@@ -148,11 +99,5 @@ public class PostLinkable extends ClickableSpan {
             this.threadId = threadId;
             this.postId = postId;
         }
-    }
-
-    public interface Callback {
-        void onLinkableClick(PostLinkable postLinkable);
-
-        int getMarkedNo(PostLinkable postLinkable);
     }
 }

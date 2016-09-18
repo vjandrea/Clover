@@ -19,10 +19,15 @@ package org.floens.chan.ui.controller;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.support.design.widget.FloatingActionButton;
 import android.support.v4.view.ViewPager;
-import android.support.v7.internal.view.ContextThemeWrapper;
+import android.support.v7.view.ContextThemeWrapper;
+import android.text.SpannableString;
+import android.text.TextUtils;
+import android.text.method.LinkMovementMethod;
+import android.text.style.ClickableSpan;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -40,7 +45,6 @@ import org.floens.chan.core.model.PostLinkable;
 import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.activity.StartActivity;
 import org.floens.chan.ui.cell.PostCell;
-import org.floens.chan.ui.cell.PostCellInterface;
 import org.floens.chan.ui.theme.Theme;
 import org.floens.chan.ui.theme.ThemeHelper;
 import org.floens.chan.ui.toolbar.NavigationItem;
@@ -57,58 +61,60 @@ import java.util.List;
 
 import static org.floens.chan.utils.AndroidUtils.dp;
 import static org.floens.chan.utils.AndroidUtils.getAttrColor;
+import static org.floens.chan.utils.AndroidUtils.getString;
 
 public class ThemeSettingsController extends Controller implements View.OnClickListener {
+    private PostCell.PostCellCallback DUMMY_POST_CALLBACK = new PostCell.PostCellCallback() {
+        private Loadable loadable = Loadable.forThread("g", 1234);
+
+        @Override
+        public Loadable getLoadable() {
+            return loadable;
+        }
+
+        @Override
+        public void onPostClicked(Post post) {
+        }
+
+        @Override
+        public void onThumbnailClicked(Post post, ThumbnailView thumbnail) {
+        }
+
+        @Override
+        public void onShowPostReplies(Post post) {
+        }
+
+        @Override
+        public void onPopulatePostOptions(Post post, List<FloatingMenuItem> menu) {
+            menu.add(new FloatingMenuItem(1, "Option"));
+        }
+
+        @Override
+        public void onPostOptionClicked(Post post, Object id) {
+        }
+
+        @Override
+        public void onPostLinkableClicked(PostLinkable linkable) {
+        }
+
+        @Override
+        public void onPostNoClicked(Post post) {
+        }
+    };
+
     private ViewPager pager;
     private FloatingActionButton done;
+    private TextView textView;
 
     private Adapter adapter;
     private ThemeHelper themeHelper;
 
-    private List<ThemeHelper.PrimaryColor> colors = new ArrayList<>();
-
-    private PostCell.PostCellCallback DUMMY_POST_CALLBACK;
+    private List<Theme> themes;
+    private List<ThemeHelper.PrimaryColor> selectedPrimaryColors = new ArrayList<>();
+    private ThemeHelper.PrimaryColor selectedAccentColor;
 
     public ThemeSettingsController(Context context) {
         super(context);
-
-        DUMMY_POST_CALLBACK = new PostCell.PostCellCallback() {
-            private Loadable loadable = new Loadable("g", 1234);
-
-            @Override
-            public Loadable getLoadable() {
-                return loadable;
-            }
-
-            @Override
-            public void onPostClicked(Post post) {
-            }
-
-            @Override
-            public void onThumbnailClicked(Post post, ThumbnailView thumbnail) {
-            }
-
-            @Override
-            public void onShowPostReplies(Post post) {
-            }
-
-            @Override
-            public void onPopulatePostOptions(Post post, List<FloatingMenuItem> menu) {
-                menu.add(new FloatingMenuItem(1, "Option"));
-            }
-
-            @Override
-            public void onPostOptionClicked(Post post, Object id) {
-            }
-
-            @Override
-            public void onPostLinkableClicked(PostLinkable linkable) {
-            }
-
-            @Override
-            public void onPostNoClicked(Post post) {
-            }
-        };
     }
 
     @Override
@@ -116,13 +122,28 @@ public class ThemeSettingsController extends Controller implements View.OnClickL
         super.onCreate();
 
         navigationItem.setTitle(R.string.settings_screen_theme);
+        navigationItem.swipeable = false;
         view = inflateRes(R.layout.controller_theme);
 
         themeHelper = ThemeHelper.getInstance();
+        themes = themeHelper.getThemes();
 
         pager = (ViewPager) view.findViewById(R.id.pager);
         done = (FloatingActionButton) view.findViewById(R.id.add);
         done.setOnClickListener(this);
+
+        textView = (TextView) view.findViewById(R.id.text);
+
+        SpannableString changeAccentColor = new SpannableString(getString(R.string.setting_theme_accent));
+        changeAccentColor.setSpan(new ClickableSpan() {
+            @Override
+            public void onClick(View widget) {
+                showAccentColorPicker();
+            }
+        }, 0, changeAccentColor.length(), 0);
+
+        textView.setText(TextUtils.concat(getString(R.string.setting_theme_explanation), changeAccentColor));
+        textView.setMovementMethod(LinkMovementMethod.getInstance());
 
         adapter = new Adapter();
         pager.setAdapter(adapter);
@@ -130,31 +151,76 @@ public class ThemeSettingsController extends Controller implements View.OnClickL
         ChanSettings.ThemeColor currentSettingsTheme = ChanSettings.getThemeAndColor();
         for (int i = 0; i < themeHelper.getThemes().size(); i++) {
             Theme theme = themeHelper.getThemes().get(i);
-            ThemeHelper.PrimaryColor color = theme.primaryColor;
+            ThemeHelper.PrimaryColor primaryColor = theme.primaryColor;
+
             if (theme.name.equals(currentSettingsTheme.theme)) {
+                // Current theme
                 pager.setCurrentItem(i, false);
-                if (currentSettingsTheme.color != null) {
-                    color = themeHelper.getColor(currentSettingsTheme.color);
-                }
             }
-            colors.add(color);
+            selectedPrimaryColors.add(primaryColor);
         }
+        selectedAccentColor = themeHelper.getTheme().accentColor;
+        done.setBackgroundTintList(ColorStateList.valueOf(selectedAccentColor.color));
     }
 
     @Override
     public void onClick(View v) {
         if (v == done) {
-            Theme theme = themeHelper.getThemes().get(pager.getCurrentItem());
-            themeHelper.changeTheme(theme, colors.get(pager.getCurrentItem()));
-            ((StartActivity) context).restart();
+            saveTheme();
         }
     }
 
-    private class Adapter extends ViewPagerAdapter {
-        private List<Theme> themes;
+    private void saveTheme() {
+        int currentItem = pager.getCurrentItem();
+        Theme selectedTheme = themeHelper.getThemes().get(currentItem);
+        ThemeHelper.PrimaryColor selectedColor = selectedPrimaryColors.get(currentItem);
+        themeHelper.changeTheme(selectedTheme, selectedColor, selectedAccentColor);
+        ((StartActivity) context).restart();
+    }
 
+    private void showAccentColorPicker() {
+        List<FloatingMenuItem> items = new ArrayList<>();
+        FloatingMenuItem selected = null;
+        for (ThemeHelper.PrimaryColor color : themeHelper.getColors()) {
+            FloatingMenuItem floatingMenuItem = new FloatingMenuItem(new ColorsAdapterItem(color, color.color), color.displayName);
+            items.add(floatingMenuItem);
+            if (color == selectedAccentColor) {
+                selected = floatingMenuItem;
+            }
+        }
+
+        FloatingMenu menu = getColorsMenu(items, selected, textView);
+        menu.setCallback(new FloatingMenu.FloatingMenuCallback() {
+            @Override
+            public void onFloatingMenuItemClicked(FloatingMenu menu, FloatingMenuItem item) {
+                ColorsAdapterItem colorItem = (ColorsAdapterItem) item.getId();
+                selectedAccentColor = colorItem.color;
+                done.setBackgroundTintList(ColorStateList.valueOf(selectedAccentColor.color));
+            }
+
+            @Override
+            public void onFloatingMenuDismissed(FloatingMenu menu) {
+
+            }
+        });
+        menu.setPopupWidth(dp(200));
+        menu.setPopupHeight(dp(300));
+        menu.show();
+    }
+
+    private FloatingMenu getColorsMenu(List<FloatingMenuItem> items, FloatingMenuItem selected, View anchor) {
+        FloatingMenu menu = new FloatingMenu(context);
+
+        menu.setItems(items);
+        menu.setAdapter(new ColorsAdapter(items));
+        menu.setSelectedItem(selected);
+        menu.setAnchor(anchor, Gravity.CENTER, 0, dp(5));
+        menu.setPopupWidth(anchor.getWidth());
+        return menu;
+    }
+
+    private class Adapter extends ViewPagerAdapter {
         public Adapter() {
-            themes = themeHelper.getThemes();
         }
 
         @Override
@@ -196,25 +262,20 @@ public class ThemeSettingsController extends Controller implements View.OnClickL
                     List<FloatingMenuItem> items = new ArrayList<>();
                     FloatingMenuItem selected = null;
                     for (ThemeHelper.PrimaryColor color : themeHelper.getColors()) {
-                        FloatingMenuItem floatingMenuItem = new FloatingMenuItem(color, color.displayName);
+                        FloatingMenuItem floatingMenuItem = new FloatingMenuItem(new ColorsAdapterItem(color, color.color500), color.displayName);
                         items.add(floatingMenuItem);
-                        if (color == colors.get(position)) {
+                        if (color == selectedPrimaryColors.get(position)) {
                             selected = floatingMenuItem;
                         }
                     }
 
-                    FloatingMenu menu = new FloatingMenu(context);
-                    menu.setItems(items);
-                    menu.setAdapter(new ColorsAdapter(items));
-                    menu.setSelectedItem(selected);
-                    menu.setAnchor(toolbar, Gravity.CENTER, 0, dp(5));
-                    menu.setPopupWidth(toolbar.getWidth());
+                    FloatingMenu menu = getColorsMenu(items, selected, toolbar);
                     menu.setCallback(new FloatingMenu.FloatingMenuCallback() {
                         @Override
                         public void onFloatingMenuItemClicked(FloatingMenu menu, FloatingMenuItem item) {
-                            ThemeHelper.PrimaryColor primaryColor = (ThemeHelper.PrimaryColor) item.getId();
-                            colors.set(position, primaryColor);
-                            toolbar.setBackgroundColor(primaryColor.color);
+                            ColorsAdapterItem colorItem = (ColorsAdapterItem) item.getId();
+                            selectedPrimaryColors.set(position, colorItem.color);
+                            toolbar.setBackgroundColor(colorItem.color.color);
                         }
 
                         @Override
@@ -231,16 +292,16 @@ public class ThemeSettingsController extends Controller implements View.OnClickL
                 }
 
                 @Override
-                public void onSearchVisibilityChanged(boolean visible) {
+                public void onSearchVisibilityChanged(NavigationItem item, boolean visible) {
                 }
 
                 @Override
-                public String getSearchHint() {
+                public String getSearchHint(NavigationItem item) {
                     return null;
                 }
 
                 @Override
-                public void onSearchEntered(String entered) {
+                public void onSearchEntered(NavigationItem item, String entered) {
                 }
             });
             toolbar.setBackgroundColor(theme.primaryColor.color);
@@ -254,7 +315,7 @@ public class ThemeSettingsController extends Controller implements View.OnClickL
                     themeContext.getResources().getDimensionPixelSize(R.dimen.toolbar_height)));
 
             PostCell postCell = (PostCell) LayoutInflater.from(themeContext).inflate(R.layout.cell_post, null);
-            postCell.setPost(theme, post, DUMMY_POST_CALLBACK, false, -1, true, PostCellInterface.PostViewMode.LIST);
+            postCell.setPost(theme, post, DUMMY_POST_CALLBACK, false, false, -1, true, ChanSettings.PostViewMode.LIST);
             linearLayout.addView(postCell, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
             return linearLayout;
@@ -280,10 +341,10 @@ public class ThemeSettingsController extends Controller implements View.OnClickL
             textView.setText(getItem(position));
             textView.setTypeface(AndroidUtils.ROBOTO_MEDIUM);
 
-            ThemeHelper.PrimaryColor color = (ThemeHelper.PrimaryColor) items.get(position).getId();
+            ColorsAdapterItem color = (ColorsAdapterItem) items.get(position).getId();
 
-            textView.setBackgroundColor(color.color);
-            boolean lightColor = (Color.red(color.color) * 0.299f) + (Color.green(color.color) * 0.587f) + (Color.blue(color.color) * 0.114f) > 125f;
+            textView.setBackgroundColor(color.bg);
+            boolean lightColor = (Color.red(color.bg) * 0.299f) + (Color.green(color.bg) * 0.587f) + (Color.blue(color.bg) * 0.114f) > 125f;
             textView.setTextColor(lightColor ? 0xff000000 : 0xffffffff);
 
             return textView;
@@ -302,6 +363,16 @@ public class ThemeSettingsController extends Controller implements View.OnClickL
         @Override
         public long getItemId(int position) {
             return position;
+        }
+    }
+
+    private static class ColorsAdapterItem {
+        public ThemeHelper.PrimaryColor color;
+        public int bg;
+
+        public ColorsAdapterItem(ThemeHelper.PrimaryColor color, int bg) {
+            this.color = color;
+            this.bg = bg;
         }
     }
 }

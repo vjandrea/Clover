@@ -33,7 +33,6 @@ import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.Post;
 import org.floens.chan.core.model.Reply;
 import org.floens.chan.core.model.SavedReply;
-import org.floens.chan.core.pool.LoadablePool;
 import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.helper.ImagePickDelegate;
 import org.floens.chan.ui.layout.CaptchaCallback;
@@ -65,6 +64,7 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
     private WatchManager watchManager;
     private DatabaseManager databaseManager;
 
+    private boolean bound = false;
     private Loadable loadable;
     private Board board;
     private Reply draft;
@@ -88,12 +88,10 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
         if (this.loadable != null) {
             unbindLoadable();
         }
+        bound = true;
         this.loadable = loadable;
 
-        Board board = boardManager.getBoardByValue(loadable.board);
-        if (board != null) {
-            this.board = board;
-        }
+        this.board = boardManager.getBoardByCode(loadable.board);
 
         draft = replyManager.getReply(loadable);
 
@@ -117,14 +115,23 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
     }
 
     public void unbindLoadable() {
+        bound = false;
         draft.file = null;
         draft.fileName = "";
         callback.loadViewsIntoDraft(draft);
         replyManager.putReply(loadable, draft);
 
-        loadable = null;
-        board = null;
         closeAll();
+    }
+
+    public void onOpen(boolean open) {
+        if (open) {
+            callback.focusComment();
+
+            if (ChanSettings.replyOpenCounter.increase() == 2) {
+                callback.showMoreHint();
+            }
+        }
     }
 
     public boolean onBack() {
@@ -203,11 +210,12 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
             if (ChanSettings.postPinThread.get() && loadable.isThreadMode()) {
                 ChanThread thread = callback.getThread();
                 if (thread != null) {
-                    watchManager.addPin(loadable, thread.op);
+                    watchManager.createPin(loadable, thread.op);
                 }
             }
 
-            databaseManager.saveReply(new SavedReply(loadable.board, replyCall.postNo, replyCall.password));
+            SavedReply savedReply = new SavedReply(loadable.board, replyCall.postNo, replyCall.password);
+            databaseManager.runTask(databaseManager.getDatabaseSavedReplyManager().saveReply(savedReply));
 
             switchPage(Page.INPUT, false);
             closeAll();
@@ -219,8 +227,8 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
             callback.loadDraftIntoViews(draft);
             callback.onPosted();
 
-            if (!loadable.isThreadMode()) {
-                callback.showThread(LoadablePool.getInstance().obtain(new Loadable(loadable.board, replyCall.postNo)));
+            if (bound && !loadable.isThreadMode()) {
+                callback.showThread(databaseManager.getDatabaseLoadableManager().get(Loadable.forThread(loadable.board, replyCall.postNo)));
             }
         } else {
             if (replyCall.errorMessage == null) {
@@ -440,5 +448,9 @@ public class ReplyPresenter implements ReplyManager.HttpCallback<ReplyHttpCall>,
         ImagePickDelegate getImagePickDelegate();
 
         ChanThread getThread();
+
+        void showMoreHint();
+
+        void focusComment();
     }
 }

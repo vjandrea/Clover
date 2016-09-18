@@ -26,6 +26,7 @@ import org.floens.chan.R;
 import org.floens.chan.core.model.ChanThread;
 import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.Post;
+import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.cell.PostCellInterface;
 import org.floens.chan.ui.cell.ThreadStatusCell;
 
@@ -50,10 +51,11 @@ public class PostAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private String highlightedPostId;
     private int highlightedPostNo = -1;
     private String highlightedPostTripcode;
+    private int selectedPost = -1;
     private int lastSeenIndicatorPosition = -1;
     private boolean bound;
 
-    private PostCellInterface.PostViewMode postViewMode;
+    private ChanSettings.PostViewMode postViewMode;
 
     public PostAdapter(RecyclerView recyclerView, PostAdapterCallback postAdapterCallback, PostCellInterface.PostCellCallback postCellCallback, ThreadStatusCell.Callback statusCellCallback) {
         this.recyclerView = recyclerView;
@@ -102,8 +104,9 @@ public class PostAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             case TYPE_POST_STUB:
                 PostViewHolder postViewHolder = (PostViewHolder) holder;
                 Post post = displayList.get(getPostPosition(position));
-                boolean highlight = post == highlightedPost || post.id.equals(highlightedPostId) || post.no == highlightedPostNo || post.tripcode.equals(highlightedPostTripcode);
-                postViewHolder.postView.setPost(null, post, postCellCallback, highlight, -1, true, postViewMode);
+                boolean highlight = post == highlightedPost || post.id.equals(highlightedPostId) || post.no == highlightedPostNo ||
+                        post.tripcode.equals(highlightedPostTripcode);
+                postViewHolder.postView.setPost(null, post, postCellCallback, highlight, post.no == selectedPost, -1, true, postViewMode);
                 break;
             case TYPE_STATUS:
                 ((StatusViewHolder) holder).threadStatusCell.update();
@@ -113,24 +116,9 @@ public class PostAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
     }
 
-
     @Override
     public int getItemCount() {
         int size = displayList.size();
-
-        if (showStatusView()) {
-            size++;
-        }
-
-        if (lastSeenIndicatorPosition >= 0) {
-            size++;
-        }
-
-        return size;
-    }
-
-    public int getUnfilteredDisplaySize() {
-        int size = sourceList.size();
 
         if (showStatusView()) {
             size++;
@@ -211,19 +199,23 @@ public class PostAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         highlightedPostId = null;
         highlightedPostNo = -1;
         highlightedPostTripcode = null;
+        selectedPost = -1;
         lastSeenIndicatorPosition = -1;
+        error = null;
         bound = false;
     }
 
     public void showError(String error) {
         this.error = error;
         if (showStatusView()) {
-            RecyclerView.ViewHolder viewHolder = recyclerView.findViewHolderForAdapterPosition(getItemCount() - 1);
-            // Recyclerview did not sync yet
-            if (viewHolder instanceof StatusViewHolder) {
-                ThreadStatusCell threadStatusCell = ((StatusViewHolder) viewHolder).threadStatusCell;
-                threadStatusCell.setError(error);
-                threadStatusCell.update();
+            final int childCount = recyclerView.getChildCount();
+            for (int i = 0; i < childCount; i++) {
+                View child = recyclerView.getChildAt(i);
+                if (child instanceof ThreadStatusCell) {
+                    ThreadStatusCell threadStatusCell = (ThreadStatusCell) child;
+                    threadStatusCell.setError(error);
+                    threadStatusCell.update();
+                }
             }
         }
     }
@@ -260,7 +252,12 @@ public class PostAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         notifyDataSetChanged();
     }
 
-    public void setPostViewMode(PostCellInterface.PostViewMode postViewMode) {
+    public void selectPost(int no) {
+        selectedPost = no;
+        notifyDataSetChanged();
+    }
+
+    public void setPostViewMode(ChanSettings.PostViewMode postViewMode) {
         this.postViewMode = postViewMode;
     }
 

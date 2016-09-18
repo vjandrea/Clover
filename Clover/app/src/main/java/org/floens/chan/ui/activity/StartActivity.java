@@ -37,19 +37,22 @@ import org.floens.chan.R;
 import org.floens.chan.chan.ChanHelper;
 import org.floens.chan.controller.Controller;
 import org.floens.chan.controller.NavigationController;
+import org.floens.chan.core.database.DatabaseLoadableManager;
 import org.floens.chan.core.manager.BoardManager;
 import org.floens.chan.core.model.Board;
 import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.Pin;
-import org.floens.chan.core.pool.LoadablePool;
 import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.controller.BrowseController;
+import org.floens.chan.ui.controller.DoubleNavigationController;
 import org.floens.chan.ui.controller.DrawerController;
 import org.floens.chan.ui.controller.SplitNavigationController;
 import org.floens.chan.ui.controller.StyledToolbarNavigationController;
+import org.floens.chan.ui.controller.ThreadSlideController;
 import org.floens.chan.ui.controller.ViewThreadController;
 import org.floens.chan.ui.helper.ImagePickDelegate;
 import org.floens.chan.ui.helper.PreviousVersionHandler;
+import org.floens.chan.ui.helper.RuntimePermissionsHelper;
 import org.floens.chan.ui.state.ChanState;
 import org.floens.chan.ui.theme.ThemeHelper;
 import org.floens.chan.utils.AndroidUtils;
@@ -72,6 +75,7 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
     private BrowseController browseController;
 
     private ImagePickDelegate imagePickDelegate;
+    private RuntimePermissionsHelper runtimePermissionsHelper;
 
     public StartActivity() {
         boardManager = Chan.getBoardManager();
@@ -84,6 +88,7 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
         ThemeHelper.getInstance().setupContext(this);
 
         imagePickDelegate = new ImagePickDelegate(this);
+        runtimePermissionsHelper = new RuntimePermissionsHelper(this);
 
         contentView = (ViewGroup) findViewById(android.R.id.content);
 
@@ -92,23 +97,7 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
         drawerController.onCreate();
         drawerController.onShow();
 
-        StyledToolbarNavigationController toolbarNavigationController = new StyledToolbarNavigationController(this);
-
-        if (AndroidUtils.isTablet(this) && !ChanSettings.forcePhoneLayout.get()) {
-            SplitNavigationController splitNavigationController = new SplitNavigationController(this);
-            splitNavigationController.setEmptyView((ViewGroup) LayoutInflater.from(this).inflate(R.layout.layout_split_empty, null));
-
-            drawerController.setChildController(splitNavigationController);
-
-            splitNavigationController.setLeftController(toolbarNavigationController);
-            mainNavigationController = toolbarNavigationController;
-        } else {
-            drawerController.setChildController(toolbarNavigationController);
-            mainNavigationController = toolbarNavigationController;
-        }
-
-        browseController = new BrowseController(this);
-        mainNavigationController.pushController(browseController, false);
+        setupLayout();
 
         setContentView(drawerController.view);
         addController(drawerController);
@@ -129,11 +118,12 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
             if (chanState == null) {
                 Logger.w(TAG, "savedInstanceState was not null, but no ChanState was found!");
             } else {
-                chanState.board = LoadablePool.getInstance().obtain(chanState.board);
-                chanState.thread = LoadablePool.getInstance().obtain(chanState.thread);
+                DatabaseLoadableManager loadableManager = Chan.getDatabaseManager().getDatabaseLoadableManager();
+                chanState.board = loadableManager.get(chanState.board);
+                chanState.thread = loadableManager.get(chanState.thread);
 
                 loadDefault = false;
-                Board board = boardManager.getBoardByValue(chanState.board.board);
+                Board board = boardManager.getBoardByCode(chanState.board.board);
                 browseController.loadBoard(board);
 
                 if (chanState.thread.mode == Loadable.Mode.THREAD) {
@@ -146,7 +136,7 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
                 Loadable fromUri = ChanHelper.getLoadableFromStartUri(data);
                 if (fromUri != null) {
                     loadDefault = false;
-                    Board board = boardManager.getBoardByValue(fromUri.board);
+                    Board board = boardManager.getBoardByCode(fromUri.board);
                     browseController.loadBoard(board);
 
                     if (fromUri.isThreadMode()) {
@@ -172,6 +162,45 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
 
         PreviousVersionHandler previousVersionHandler = new PreviousVersionHandler();
         previousVersionHandler.run(this);
+    }
+
+    private void setupLayout() {
+        mainNavigationController = new StyledToolbarNavigationController(this);
+
+        ChanSettings.LayoutMode layoutMode = ChanSettings.layoutMode.get();
+        if (layoutMode == ChanSettings.LayoutMode.AUTO) {
+            if (AndroidUtils.isTablet(this)) {
+                layoutMode = ChanSettings.LayoutMode.SPLIT;
+            } else {
+                layoutMode = ChanSettings.LayoutMode.PHONE;
+            }
+        }
+
+        switch (layoutMode) {
+            case SPLIT:
+                SplitNavigationController split = new SplitNavigationController(this);
+                split.setEmptyView((ViewGroup) LayoutInflater.from(this).inflate(R.layout.layout_split_empty, null));
+
+                drawerController.setChildController(split);
+
+                split.setLeftController(mainNavigationController);
+                break;
+            case PHONE:
+            case SLIDE:
+                drawerController.setChildController(mainNavigationController);
+                break;
+        }
+
+        browseController = new BrowseController(this);
+
+        if (layoutMode == ChanSettings.LayoutMode.SLIDE) {
+            ThreadSlideController slideController = new ThreadSlideController(this);
+            slideController.setEmptyView((ViewGroup) LayoutInflater.from(this).inflate(R.layout.layout_split_empty, null));
+            mainNavigationController.pushController(slideController, false);
+            slideController.setLeftController(browseController);
+        } else {
+            mainNavigationController.pushController(browseController, false);
+        }
     }
 
     public void restart() {
@@ -220,11 +249,11 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
         } else {
             Loadable thread = null;
 
-            if (drawerController.getChildController() instanceof SplitNavigationController) {
-                SplitNavigationController splitNavigationController = (SplitNavigationController) drawerController.getChildController();
-                if (splitNavigationController.rightController instanceof NavigationController) {
-                    NavigationController rightNavigationController = (NavigationController) splitNavigationController.rightController;
-                    for (Controller controller : rightNavigationController.getControllerList()) {
+            if (drawerController.childControllers.get(0) instanceof SplitNavigationController) {
+                SplitNavigationController doubleNav = (SplitNavigationController) drawerController.childControllers.get(0);
+                if (doubleNav.getRightController() instanceof NavigationController) {
+                    NavigationController rightNavigationController = (NavigationController) doubleNav.getRightController();
+                    for (Controller controller : rightNavigationController.childControllers) {
                         if (controller instanceof ViewThreadController) {
                             thread = ((ViewThreadController) controller).getLoadable();
                             break;
@@ -233,29 +262,53 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
 
                 }
             } else {
-                List<Controller> controllers = mainNavigationController.getControllerList();
+                List<Controller> controllers = mainNavigationController.childControllers;
                 for (Controller controller : controllers) {
                     if (controller instanceof ViewThreadController) {
                         thread = ((ViewThreadController) controller).getLoadable();
                         break;
+                    } else if (controller instanceof ThreadSlideController) {
+                        ThreadSlideController slideNav = (ThreadSlideController) controller;
+                        if (slideNav.getRightController() instanceof ViewThreadController) {
+                            thread = ((ViewThreadController) slideNav.getRightController()).getLoadable();
+                            break;
+                        }
                     }
                 }
             }
 
             if (thread == null) {
                 // Make the parcel happy
-                thread = new Loadable();
+                thread = Loadable.emptyLoadable();
             }
 
-            outState.putParcelable(STATE_KEY, new ChanState(board, thread));
+            outState.putParcelable(STATE_KEY, new ChanState(board.copy(), thread.copy()));
         }
     }
 
     @Override
     public NdefMessage createNdefMessage(NfcEvent event) {
-        Controller controller = mainNavigationController.getTop();
-        if (controller instanceof NfcAdapter.CreateNdefMessageCallback) {
-            return ((NfcAdapter.CreateNdefMessageCallback) controller).createNdefMessage(event);
+        Controller threadController = null;
+        if (drawerController.childControllers.get(0) instanceof DoubleNavigationController) {
+            SplitNavigationController splitNavigationController = (SplitNavigationController) drawerController.childControllers.get(0);
+            if (splitNavigationController.rightController instanceof NavigationController) {
+                NavigationController rightNavigationController = (NavigationController) splitNavigationController.rightController;
+                for (Controller controller : rightNavigationController.childControllers) {
+                    if (controller instanceof NfcAdapter.CreateNdefMessageCallback) {
+                        threadController = controller;
+                        break;
+                    }
+                }
+
+            }
+        }
+
+        if (threadController == null) {
+            threadController = mainNavigationController.getTop();
+        }
+
+        if (threadController instanceof NfcAdapter.CreateNdefMessageCallback) {
+            return ((NfcAdapter.CreateNdefMessageCallback) threadController).createNdefMessage(event);
         } else {
             return null;
         }
@@ -277,6 +330,10 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
         return imagePickDelegate;
     }
 
+    public RuntimePermissionsHelper getRuntimePermissionsHelper() {
+        return runtimePermissionsHelper;
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -295,23 +352,28 @@ public class StartActivity extends AppCompatActivity implements NfcAdapter.Creat
                         .setPositiveButton(R.string.exit, new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface dialog, int which) {
-                                stackTop().onHide();
                                 StartActivity.super.onBackPressed();
                             }
                         })
                         .show();
             } else {
-                // Don't destroy the view, let Android do that or it'll create artifacts
-                stackTop().onHide();
                 super.onBackPressed();
             }
         }
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        runtimePermissionsHelper.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
 
+        stackTop().onHide();
         stackTop().onDestroy();
         stack.clear();
     }

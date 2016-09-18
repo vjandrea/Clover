@@ -20,15 +20,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="4dp"
-    android:padding="50dp"
+    android:layout_margin="@dimen/grid_card_margin"
     card_view:cardBackgroundColor="?backcolor"
-    card_view:cardCornerRadius="2dp"
-    card_view:cardElevation="4dp">
+    card_view:cardCornerRadius="@dimen/grid_card_corner_radius"
+    card_view:cardElevation="2dp">
 
-    <LinearLayout
+    <org.floens.chan.ui.layout.FixedRatioLinearLayout
+        android:id="@+id/card_content"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/grid_card_height"
+        android:layout_height="wrap_content"
         android:background="@drawable/item_background"
         android:orientation="vertical">
 
@@ -36,7 +36,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
 
-            <org.floens.chan.ui.view.FixedRatioThumbnailView
+            <org.floens.chan.ui.view.PostImageThumbnailView
                 android:id="@+id/thumbnail"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
@@ -68,7 +68,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             android:paddingRight="8dp"
             android:paddingTop="8dp" />
 
-        <org.floens.chan.ui.view.FastTextView
+        <org.floens.chan.ui.text.FastTextView
             android:id="@+id/comment"
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -89,6 +89,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             android:singleLine="true"
             android:textColor="?attr/text_color_secondary" />
 
-    </LinearLayout>
+    </org.floens.chan.ui.layout.FixedRatioLinearLayout>
 
 </org.floens.chan.ui.cell.CardPostCell>

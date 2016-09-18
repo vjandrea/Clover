@@ -42,11 +42,13 @@ import org.floens.chan.Chan;
 import org.floens.chan.R;
 import org.floens.chan.core.manager.BoardManager;
 import org.floens.chan.core.manager.FilterEngine;
+import org.floens.chan.core.manager.FilterType;
 import org.floens.chan.core.model.Board;
 import org.floens.chan.core.model.Filter;
 import org.floens.chan.ui.controller.FiltersController;
 import org.floens.chan.ui.dialog.ColorPickerView;
 import org.floens.chan.ui.drawable.DropdownArrowDrawable;
+import org.floens.chan.ui.helper.BoardHelper;
 import org.floens.chan.ui.view.FloatingMenu;
 import org.floens.chan.ui.view.FloatingMenuItem;
 
@@ -74,7 +76,7 @@ public class FilterLayout extends LinearLayout implements View.OnClickListener {
     private BoardManager boardManager;
 
     private FilterLayoutCallback callback;
-    private Filter filter = new Filter();
+    private Filter filter;
 
     private List<Board> appliedBoards = new ArrayList<>();
 
@@ -154,7 +156,7 @@ public class FilterLayout extends LinearLayout implements View.OnClickListener {
     }
 
     public void setFilter(Filter filter) {
-        this.filter.apply(filter);
+        this.filter = filter;
         appliedBoards.clear();
         appliedBoards.addAll(FilterEngine.getInstance().getBoardsForFilter(filter));
 
@@ -183,43 +185,85 @@ public class FilterLayout extends LinearLayout implements View.OnClickListener {
     @Override
     public void onClick(View v) {
         if (v == typeText) {
-            List<FloatingMenuItem> menuItems = new ArrayList<>(6);
+            @SuppressWarnings("unchecked")
+            final SelectLayout<FilterType> selectLayout = (SelectLayout<FilterType>) LayoutInflater.from(getContext()).inflate(R.layout.layout_select, null);
 
-            for (FilterEngine.FilterType filterType : FilterEngine.FilterType.values()) {
-                menuItems.add(new FloatingMenuItem(filterType, FiltersController.filterTypeName(filterType)));
+            List<SelectLayout.SelectItem<FilterType>> items = new ArrayList<>();
+            for (FilterType filterType : FilterType.values()) {
+                String name = FiltersController.filterTypeName(filterType);
+                String description = getString(filterType.isRegex ? R.string.filter_type_regex_matching : R.string.filter_type_string_matching);
+                boolean checked = filter.hasFilter(filterType);
+
+                items.add(new SelectLayout.SelectItem<>(
+                        filterType, filterType.flag, name, description, name, checked
+                ));
             }
 
-            FloatingMenu menu = new FloatingMenu(v.getContext());
-            menu.setAnchor(v, Gravity.LEFT, -dp(5), -dp(5));
-            menu.setPopupWidth(dp(150));
-            menu.setCallback(new FloatingMenu.FloatingMenuCallback() {
-                @Override
-                public void onFloatingMenuItemClicked(FloatingMenu menu, FloatingMenuItem item) {
-                    FilterEngine.FilterType type = (FilterEngine.FilterType) item.getId();
-                    filter.type = type.id;
-                    updateFilterType();
-                    updatePatternPreview();
-                }
-
-                @Override
-                public void onFloatingMenuDismissed(FloatingMenu menu) {
-                }
-            });
-            menu.setItems(menuItems);
-            menu.show();
-        } else if (v == boardsSelector) {
-            final BoardSelectLayout boardSelectLayout = (BoardSelectLayout) LayoutInflater.from(getContext()).inflate(R.layout.layout_board_select, null);
-
-            boardSelectLayout.setCheckedBoards(appliedBoards);
+            selectLayout.setItems(items);
 
             new AlertDialog.Builder(getContext())
-                    .setView(boardSelectLayout)
+                    .setView(selectLayout)
+                    .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            List<SelectLayout.SelectItem<FilterType>> items = selectLayout.getItems();
+                            int flags = 0;
+                            for (SelectLayout.SelectItem<FilterType> item : items) {
+                                if (item.checked) {
+                                    flags |= item.item.flag;
+                                }
+                            }
+
+                            filter.type = flags;
+                            updateFilterType();
+                            updatePatternPreview();
+                        }
+                    })
+                    .show();
+        } else if (v == boardsSelector) {
+            @SuppressWarnings("unchecked")
+            final SelectLayout<Board> selectLayout = (SelectLayout<Board>) LayoutInflater.from(getContext()).inflate(R.layout.layout_select, null);
+
+            List<SelectLayout.SelectItem<Board>> items = new ArrayList<>();
+            List<Board> savedList = boardManager.getSavedBoards();
+            for (int i = 0; i < savedList.size(); i++) {
+                Board saved = savedList.get(i);
+                String name = BoardHelper.getName(saved);
+                String description = BoardHelper.getDescription(saved);
+                String search = name + " " + saved.code;
+
+                boolean checked = false;
+                for (int j = 0; j < appliedBoards.size(); j++) {
+                    Board appliedBoard = appliedBoards.get(j);
+                    if (appliedBoard.code.equals(saved.code)) {
+                        checked = true;
+                        break;
+                    }
+                }
+
+                items.add(new SelectLayout.SelectItem<>(
+                        saved, saved.id, name, description, search, checked
+                ));
+            }
+
+            selectLayout.setItems(items);
+
+            new AlertDialog.Builder(getContext())
+                    .setView(selectLayout)
                     .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialog, int which) {
                             appliedBoards.clear();
-                            appliedBoards.addAll(boardSelectLayout.getCheckedBoards());
-                            filter.allBoards = boardSelectLayout.getAllChecked();
+
+                            List<SelectLayout.SelectItem<Board>> items = selectLayout.getItems();
+                            for (int i = 0; i < items.size(); i++) {
+                                SelectLayout.SelectItem<Board> selectItem = items.get(i);
+                                if (selectItem.checked) {
+                                    appliedBoards.add(selectItem.item);
+                                }
+                            }
+
+                            filter.allBoards = selectLayout.areAllChecked();
                             updateBoardsSummary();
                         }
                     })
@@ -294,14 +338,7 @@ public class FilterLayout extends LinearLayout implements View.OnClickListener {
     }
 
     private void updateFilterValidity() {
-        FilterEngine.FilterType filterType = FilterEngine.FilterType.forId(filter.type);
-
-        boolean valid;
-        if (filterType.isRegex) {
-            valid = FilterEngine.getInstance().compile(filter.pattern) != null;
-        } else {
-            valid = !TextUtils.isEmpty(filter.pattern);
-        }
+        boolean valid = !TextUtils.isEmpty(filter.pattern) && FilterEngine.getInstance().compile(filter.pattern) != null;
 
         if (valid != patternContainerErrorShowing) {
             patternContainerErrorShowing = valid;
@@ -316,7 +353,7 @@ public class FilterLayout extends LinearLayout implements View.OnClickListener {
     private void updateBoardsSummary() {
         String text = getString(R.string.filter_boards) + " (";
         if (filter.allBoards) {
-            text += getString(R.string.filter_boards_all);
+            text += getString(R.string.filter_all);
         } else {
             text += String.valueOf(appliedBoards.size());
         }
@@ -339,14 +376,14 @@ public class FilterLayout extends LinearLayout implements View.OnClickListener {
     }
 
     private void updateFilterType() {
-        FilterEngine.FilterType filterType = FilterEngine.FilterType.forId(filter.type);
-        typeText.setText(FiltersController.filterTypeName(filterType));
-        pattern.setHint(filterType.isRegex ? R.string.filter_pattern_hint_regex : R.string.filter_pattern_hint_exact);
+        int types = FilterType.forFlags(filter.type).size();
+        String text = getString(R.string.filter_types) + " (" + types + ")";
+        typeText.setText(text);
     }
 
     private void updatePatternPreview() {
         String text = patternPreview.getText().toString();
-        boolean matches = text.length() > 0 && FilterEngine.getInstance().matches(filter, text, true);
+        boolean matches = text.length() > 0 && FilterEngine.getInstance().matches(filter, true, text, true);
         patternPreviewStatus.setText(matches ? R.string.filter_matches : R.string.filter_no_matches);
     }
 

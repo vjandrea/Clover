@@ -20,6 +20,7 @@ package org.floens.chan.core.manager;
 import android.text.TextUtils;
 
 import org.floens.chan.Chan;
+import org.floens.chan.core.database.DatabaseFilterManager;
 import org.floens.chan.core.database.DatabaseManager;
 import org.floens.chan.core.model.Board;
 import org.floens.chan.core.model.Filter;
@@ -28,7 +29,9 @@ import org.floens.chan.utils.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -40,35 +43,6 @@ public class FilterEngine {
 
     public static FilterEngine getInstance() {
         return instance;
-    }
-
-    public enum FilterType {
-        TRIPCODE(0, false),
-        NAME(1, false),
-        COMMENT(2, true),
-        ID(3, false),
-        SUBJECT(4, true),
-        FILENAME(5, true);
-
-        public final int id;
-        public final boolean isRegex;
-
-        FilterType(int id, boolean isRegex) {
-            this.id = id;
-            this.isRegex = isRegex;
-        }
-
-        public static FilterType forId(int id) {
-            return enums[id];
-        }
-
-        private static FilterType[] enums = new FilterType[6];
-
-        static {
-            for (FilterType type : values()) {
-                enums[type.id] = type;
-            }
-        }
     }
 
     public enum FilterAction {
@@ -95,95 +69,93 @@ public class FilterEngine {
         }
     }
 
+    private final Map<String, Pattern> patternCache = new HashMap<>();
+
     private final DatabaseManager databaseManager;
+    private final DatabaseFilterManager databaseFilterManager;
 
     private List<Filter> filters;
     private final List<Filter> enabledFilters = new ArrayList<>();
 
     private FilterEngine() {
         databaseManager = Chan.getDatabaseManager();
-        filters = databaseManager.getFilters();
-        updateEnabledFilters();
+        databaseFilterManager = databaseManager.getDatabaseFilterManager();
+        update();
     }
 
-    /**
-     * Add or update a filter, thread-safe.
-     * The filter will be updated in the db if the {@link Filter#id} was non-null.
-     *
-     * @param filter filter too add or update.
-     */
-    public void addOrUpdate(Filter filter) {
-        databaseManager.addOrUpdateFilter(filter);
-        filters = databaseManager.getFilters();
-        updateEnabledFilters();
+    public void deleteFilter(Filter filter) {
+        databaseManager.runTaskSync(databaseFilterManager.deleteFilter(filter));
+        update();
     }
 
-    /**
-     * Remove a filter, thread-safe.
-     *
-     * @param filter filter to remove
-     */
-    public void remove(Filter filter) {
-        databaseManager.removeFilter(filter);
-        filters = databaseManager.getFilters();
-        updateEnabledFilters();
+    public void createOrUpdateFilter(Filter filter) {
+        if (filter.id == 0) {
+            databaseManager.runTaskSync(databaseFilterManager.createFilter(filter));
+        } else {
+            databaseManager.runTaskSync(databaseFilterManager.updateFilter(filter));
+        }
+        update();
     }
 
-    /**
-     * Get all enabled filters.
-     *
-     * @return List of enabled filters
-     */
     public List<Filter> getEnabledFilters() {
         return enabledFilters;
     }
 
+    // threadsafe
     public boolean matches(Filter filter, Post post) {
-        // Post has not been finish()ed yet, account for invalid values
-        String text = null;
-        FilterType type = FilterType.forId(filter.type);
-        switch (type) {
-            case TRIPCODE:
-                text = post.tripcode;
-                break;
-            case NAME:
-                text = post.name;
-                break;
-            case COMMENT:
-                text = post.rawComment;
-                break;
-            case ID:
-                text = post.id;
-                break;
-            case SUBJECT:
-                text = post.subject;
-                break;
-            case FILENAME:
-                text = post.filename;
-                break;
+        if ((filter.type & FilterType.TRIPCODE.flag) != 0 && matches(filter, FilterType.TRIPCODE.isRegex, post.tripcode, false)) {
+            return true;
         }
 
-        return !TextUtils.isEmpty(text) && matches(filter, text, false);
+        if ((filter.type & FilterType.NAME.flag) != 0 && matches(filter, FilterType.NAME.isRegex, post.name, false)) {
+            return true;
+        }
+
+        if ((filter.type & FilterType.COMMENT.flag) != 0 && matches(filter, FilterType.COMMENT.isRegex, post.rawComment, false)) {
+            return true;
+        }
+
+        if ((filter.type & FilterType.ID.flag) != 0 && matches(filter, FilterType.ID.isRegex, post.id, false)) {
+            return true;
+        }
+
+        if ((filter.type & FilterType.SUBJECT.flag) != 0 && matches(filter, FilterType.SUBJECT.isRegex, post.subject, false)) {
+            return true;
+        }
+
+        if ((filter.type & FilterType.FILENAME.flag) != 0 && matches(filter, FilterType.FILENAME.isRegex, post.filename, false)) {
+            return true;
+        }
+
+        return false;
     }
 
-    public boolean matches(Filter filter, String text, boolean forceCompile) {
-        FilterType type = FilterType.forId(filter.type);
-        if (type.isRegex) {
-            Matcher matcher = null;
-            if (!forceCompile) {
-                matcher = filter.compiledMatcher;
-            }
+    // threadsafe
+    public boolean matches(Filter filter, boolean matchRegex, String text, boolean forceCompile) {
+        if (TextUtils.isEmpty(text)) {
+            return false;
+        }
 
-            if (matcher == null) {
-                Pattern compiledPattern = compile(filter.pattern);
-                if (compiledPattern != null) {
-                    matcher = filter.compiledMatcher = compiledPattern.matcher("");
-                    Logger.d(TAG, "Resulting pattern: " + filter.compiledMatcher);
+        if (matchRegex) {
+            Pattern pattern = null;
+            if (!forceCompile) {
+                synchronized (patternCache) {
+                    pattern = patternCache.get(filter.pattern);
                 }
             }
 
-            if (matcher != null) {
-                matcher.reset(text);
+            if (pattern == null) {
+                pattern = compile(filter.pattern);
+                if (pattern != null) {
+                    synchronized (patternCache) {
+                        patternCache.put(filter.pattern, pattern);
+                    }
+                    Logger.d(TAG, "Resulting pattern: " + pattern.pattern());
+                }
+            }
+
+            if (pattern != null) {
+                Matcher matcher = pattern.matcher(text);
                 try {
                     return matcher.find();
                 } catch (IllegalArgumentException e) {
@@ -203,12 +175,13 @@ public class FilterEngine {
     private static final Pattern filterFilthyPattern = Pattern.compile("(\\.|\\^|\\$|\\*|\\+|\\?|\\(|\\)|\\[|\\]|\\{|\\}|\\\\|\\||\\-)");
     private static final Pattern wildcardPattern = Pattern.compile("\\\\\\*"); // an escaped \ and an escaped *, to replace an escaped * from escapeRegex
 
+    // threadsafe
     public Pattern compile(String rawPattern) {
-        Pattern pattern;
-
         if (TextUtils.isEmpty(rawPattern)) {
             return null;
         }
+
+        Pattern pattern;
 
         Matcher isRegex = isRegexPattern.matcher(rawPattern);
         if (isRegex.matches()) {
@@ -226,7 +199,8 @@ public class FilterEngine {
             }
         } else if (rawPattern.length() >= 2 && rawPattern.charAt(0) == '"' && rawPattern.charAt(rawPattern.length() - 1) == '"') {
             // "matches an exact sentence"
-            pattern = Pattern.compile(escapeRegex(rawPattern).substring(1, rawPattern.length() - 1));
+            String text = escapeRegex(rawPattern.substring(1, rawPattern.length() - 1));
+            pattern = Pattern.compile(text, Pattern.CASE_INSENSITIVE);
         } else {
             String[] words = rawPattern.split(" ");
             String text = "";
@@ -252,7 +226,7 @@ public class FilterEngine {
         } else if (!TextUtils.isEmpty(filter.boards)) {
             List<Board> appliedBoards = new ArrayList<>();
             for (String value : filter.boards.split(",")) {
-                Board boardByValue = Chan.getBoardManager().getBoardByValue(value);
+                Board boardByValue = Chan.getBoardManager().getBoardByCode(value);
                 if (boardByValue != null) {
                     appliedBoards.add(boardByValue);
                 }
@@ -267,7 +241,7 @@ public class FilterEngine {
         filter.boards = "";
         for (int i = 0; i < appliedBoards.size(); i++) {
             Board board = appliedBoards.get(i);
-            filter.boards += board.value;
+            filter.boards += board.code;
             if (i < appliedBoards.size() - 1) {
                 filter.boards += ",";
             }
@@ -278,7 +252,8 @@ public class FilterEngine {
         return filterFilthyPattern.matcher(filthy).replaceAll("\\\\$1"); // Escape regex special characters with a \
     }
 
-    private void updateEnabledFilters() {
+    private void update() {
+        filters = databaseManager.runTaskSync(databaseFilterManager.getFilters());
         List<Filter> enabled = new ArrayList<>();
         for (Filter filter : filters) {
             if (filter.enabled) {
@@ -286,9 +261,7 @@ public class FilterEngine {
             }
         }
 
-        synchronized (enabledFilters) {
-            enabledFilters.clear();
-            enabledFilters.addAll(enabled);
-        }
+        enabledFilters.clear();
+        enabledFilters.addAll(enabled);
     }
 }

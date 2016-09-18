@@ -30,12 +30,13 @@ import android.widget.TextView;
 import org.floens.chan.R;
 import org.floens.chan.core.model.Post;
 import org.floens.chan.core.settings.ChanSettings;
+import org.floens.chan.ui.layout.FixedRatioLinearLayout;
+import org.floens.chan.ui.text.FastTextView;
 import org.floens.chan.ui.theme.Theme;
 import org.floens.chan.ui.theme.ThemeHelper;
-import org.floens.chan.ui.view.FastTextView;
-import org.floens.chan.ui.view.FixedRatioThumbnailView;
 import org.floens.chan.ui.view.FloatingMenu;
 import org.floens.chan.ui.view.FloatingMenuItem;
+import org.floens.chan.ui.view.PostImageThumbnailView;
 import org.floens.chan.ui.view.ThumbnailView;
 
 import java.util.ArrayList;
@@ -51,7 +52,8 @@ public class CardPostCell extends CardView implements PostCellInterface, View.On
     private Post post;
     private PostCellInterface.PostCellCallback callback;
 
-    private FixedRatioThumbnailView thumbnailView;
+    private FixedRatioLinearLayout content;
+    private PostImageThumbnailView thumbnailView;
     private TextView title;
     private FastTextView comment;
     private TextView replies;
@@ -74,7 +76,9 @@ public class CardPostCell extends CardView implements PostCellInterface, View.On
     protected void onFinishInflate() {
         super.onFinishInflate();
 
-        thumbnailView = (FixedRatioThumbnailView) findViewById(R.id.thumbnail);
+        content = (FixedRatioLinearLayout) findViewById(R.id.card_content);
+        content.setRatio(9f / 16f);
+        thumbnailView = (PostImageThumbnailView) findViewById(R.id.thumbnail);
         thumbnailView.setRatio(16f / 9f);
         thumbnailView.setOnClickListener(this);
         title = (TextView) findViewById(R.id.title);
@@ -142,7 +146,7 @@ public class CardPostCell extends CardView implements PostCellInterface, View.On
     }
 
     public void setPost(Theme theme, final Post post, PostCellInterface.PostCellCallback callback,
-                        boolean highlighted, int markedNo, boolean showDivider, PostCellInterface.PostViewMode postViewMode) {
+                        boolean highlighted, boolean selected, int markedNo, boolean showDivider, ChanSettings.PostViewMode postViewMode) {
         if (this.post == post) {
             return;
         }
@@ -180,12 +184,12 @@ public class CardPostCell extends CardView implements PostCellInterface, View.On
     private void bindPost(Theme theme, Post post) {
         bound = true;
 
-        if (post.hasImage) {
+        if (post.hasImage && !ChanSettings.textOnly.get()) {
             thumbnailView.setVisibility(View.VISIBLE);
-            thumbnailView.setUrl(post.thumbnailUrl, thumbnailView.getWidth(), thumbnailView.getHeight());
+            thumbnailView.setPostImage(post.image, thumbnailView.getWidth(), thumbnailView.getHeight());
         } else {
             thumbnailView.setVisibility(View.GONE);
-            thumbnailView.setUrl(null, 0, 0);
+            thumbnailView.setPostImage(null, 0, 0);
         }
 
         if (post.filterHighlightedColor != 0) {

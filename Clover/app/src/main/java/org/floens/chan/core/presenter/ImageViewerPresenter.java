@@ -20,6 +20,7 @@ package org.floens.chan.core.presenter;
 import android.net.ConnectivityManager;
 import android.support.v4.view.ViewPager;
 
+import org.floens.chan.Chan;
 import org.floens.chan.core.model.Loadable;
 import org.floens.chan.core.model.PostImage;
 import org.floens.chan.core.settings.ChanSettings;
@@ -85,9 +86,15 @@ public class ImageViewerPresenter implements MultiImageView.Callback, ViewPager.
         if (entering || exiting) return;
         exiting = true;
 
+        PostImage postImage = images.get(selectedPosition);
+        if (postImage.type == PostImage.Type.MOVIE) {
+            // VideoView doesn't work with invisible visibility
+            callback.setImageMode(postImage, MultiImageView.Mode.LOWRES);
+        }
+
         callback.setPagerVisiblity(false);
         callback.setPreviewVisibility(true);
-        callback.startPreviewOutTransition(images.get(selectedPosition));
+        callback.startPreviewOutTransition(postImage);
         callback.showProgress(false);
     }
 
@@ -124,6 +131,8 @@ public class ImageViewerPresenter implements MultiImageView.Callback, ViewPager.
 
     @Override
     public void onModeLoaded(MultiImageView multiImageView, MultiImageView.Mode mode) {
+        if (exiting) return;
+
         if (mode == MultiImageView.Mode.LOWRES) {
             // lowres is requested at the beginning of the transition,
             // the lowres is loaded before the in transition or after
@@ -178,12 +187,12 @@ public class ImageViewerPresenter implements MultiImageView.Callback, ViewPager.
     private void onLowResInCenter() {
         PostImage postImage = images.get(selectedPosition);
 
-        if (imageAutoLoad() && !postImage.spoiler) {
+        if (imageAutoLoad(postImage) && !postImage.spoiler) {
             if (postImage.type == PostImage.Type.STATIC) {
                 callback.setImageMode(postImage, MultiImageView.Mode.BIGIMAGE);
             } else if (postImage.type == PostImage.Type.GIF) {
                 callback.setImageMode(postImage, MultiImageView.Mode.GIF);
-            } else if (postImage.type == PostImage.Type.MOVIE && videoAutoLoad()) {
+            } else if (postImage.type == PostImage.Type.MOVIE && videoAutoLoad(postImage)) {
                 callback.setImageMode(postImage, MultiImageView.Mode.MOVIE);
             }
         }
@@ -194,15 +203,11 @@ public class ImageViewerPresenter implements MultiImageView.Callback, ViewPager.
         // Don't mistake a swipe when the pager is disabled as a tap
         if (viewPagerVisible) {
             PostImage postImage = images.get(selectedPosition);
-            if (imageAutoLoad() && !postImage.spoiler) {
-                if (videoAutoLoad()) {
-                    onExit();
+            if (imageAutoLoad(postImage) && !postImage.spoiler) {
+                if (postImage.type == PostImage.Type.MOVIE) {
+                    callback.setImageMode(postImage, MultiImageView.Mode.MOVIE);
                 } else {
-                    if (postImage.type == PostImage.Type.MOVIE) {
-                        callback.setImageMode(postImage, MultiImageView.Mode.MOVIE);
-                    } else {
-                        onExit();
-                    }
+                    onExit();
                 }
             } else {
                 MultiImageView.Mode currentMode = callback.getImageMode(postImage);
@@ -257,22 +262,26 @@ public class ImageViewerPresenter implements MultiImageView.Callback, ViewPager.
         callback.onVideoError(multiImageView);
     }
 
-    private boolean imageAutoLoad() {
-        String autoLoadMode = ChanSettings.imageAutoLoadNetwork.get();
-        if (autoLoadMode.equals(ChanSettings.ImageAutoLoadMode.NONE.name)) {
+    private boolean imageAutoLoad(PostImage postImage) {
+        // Auto load the image when it is cached
+        return Chan.getFileCache().exists(postImage.imageUrl) || shouldLoadForNetworkType(ChanSettings.imageAutoLoadNetwork.get());
+    }
+
+    private boolean videoAutoLoad(PostImage postImage) {
+        return imageAutoLoad(postImage) && shouldLoadForNetworkType(ChanSettings.videoAutoLoadNetwork.get());
+    }
+
+    private boolean shouldLoadForNetworkType(ChanSettings.MediaAutoLoadMode networkType) {
+        if (networkType == ChanSettings.MediaAutoLoadMode.NONE) {
             return false;
-        } else if (autoLoadMode.equals(ChanSettings.ImageAutoLoadMode.WIFI.name)) {
+        } else if (networkType == ChanSettings.MediaAutoLoadMode.WIFI) {
             return isConnected(ConnectivityManager.TYPE_WIFI);
-        } else if (autoLoadMode.equals(ChanSettings.ImageAutoLoadMode.ALL.name)) {
+        } else if (networkType == ChanSettings.MediaAutoLoadMode.ALL) {
             return true;
         }
 
         // Not connected or unrecognized
         return false;
-    }
-
-    private boolean videoAutoLoad() {
-        return imageAutoLoad() && ChanSettings.videoAutoLoad.get();
     }
 
     private void setTitle(PostImage postImage, int position) {

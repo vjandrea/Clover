@@ -18,295 +18,104 @@
 package org.floens.chan.core.database;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 
 import com.j256.ormlite.dao.Dao;
 import com.j256.ormlite.misc.TransactionManager;
-import com.j256.ormlite.stmt.QueryBuilder;
 import com.j256.ormlite.table.TableUtils;
 
+import org.floens.chan.Chan;
 import org.floens.chan.core.model.Board;
-import org.floens.chan.core.model.Filter;
-import org.floens.chan.core.model.History;
-import org.floens.chan.core.model.Loadable;
-import org.floens.chan.core.model.Pin;
 import org.floens.chan.core.model.Post;
-import org.floens.chan.core.model.SavedReply;
 import org.floens.chan.core.model.ThreadHide;
 import org.floens.chan.utils.Logger;
+import org.floens.chan.utils.Time;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+import de.greenrobot.event.EventBus;
 
 import static com.j256.ormlite.misc.TransactionManager.callInTransaction;
 
 public class DatabaseManager {
     private static final String TAG = "DatabaseManager";
 
-    private static final long SAVED_REPLY_TRIM_TRIGGER = 250;
-    private static final long SAVED_REPLY_TRIM_COUNT = 50;
     private static final long THREAD_HIDE_TRIM_TRIGGER = 250;
     private static final long THREAD_HIDE_TRIM_COUNT = 50;
-    private static final long HISTORY_TRIM_TRIGGER = 500;
-    private static final long HISTORY_TRIM_COUNT = 50;
 
-    private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
-
+    private final ExecutorService backgroundExecutor;
     private final DatabaseHelper helper;
-
-    private final Object savedRepliesLock = new Object();
-    private final List<SavedReply> savedReplies = new ArrayList<>();
-    private final HashSet<Integer> savedRepliesIds = new HashSet<>();
 
     private final List<ThreadHide> threadHides = new ArrayList<>();
     private final HashSet<Integer> threadHidesIds = new HashSet<>();
 
-    private final Object historyLock = new Object();
-    private final HashMap<Loadable, History> historyByLoadable = new HashMap<>();
+    private final DatabasePinManager databasePinManager;
+    private final DatabaseLoadableManager databaseLoadableManager;
+    private final DatabaseHistoryManager databaseHistoryManager;
+    private final DatabaseSavedReplyManager databaseSavedReplyManager;
+    private final DatabaseFilterManager databaseFilterManager;
 
     public DatabaseManager(Context context) {
+        backgroundExecutor = Executors.newSingleThreadExecutor();
+
         helper = new DatabaseHelper(context);
+        databaseLoadableManager = new DatabaseLoadableManager(this, helper);
+        databasePinManager = new DatabasePinManager(this, helper, databaseLoadableManager);
+        databaseHistoryManager = new DatabaseHistoryManager(this, helper, databaseLoadableManager);
+        databaseSavedReplyManager = new DatabaseSavedReplyManager(this, helper);
+        databaseFilterManager = new DatabaseFilterManager(this, helper);
         initialize();
+        EventBus.getDefault().register(this);
+    }
+
+    public DatabasePinManager getDatabasePinManager() {
+        return databasePinManager;
+    }
+
+    public DatabaseLoadableManager getDatabaseLoadableManager() {
+        return databaseLoadableManager;
+    }
+
+    public DatabaseHistoryManager getDatabaseHistoryManager() {
+        return databaseHistoryManager;
+    }
+
+    public DatabaseSavedReplyManager getDatabaseSavedReplyManager() {
+        return databaseSavedReplyManager;
+    }
+
+    public DatabaseFilterManager getDatabaseFilterManager() {
+        return databaseFilterManager;
+    }
+
+    // Called when the app changes foreground state
+    public void onEvent(Chan.ForegroundChangedMessage message) {
+        if (!message.inForeground) {
+            runTask(databaseLoadableManager.flush());
+        }
+    }
+
+    private void initialize() {
+        loadThreadHides();
+        runTaskSync(databaseHistoryManager.load());
+        runTaskSync(databaseSavedReplyManager.load());
     }
 
     /**
-     * Save a reply to the savedreply table.
-     * Threadsafe.
-     *
-     * @param saved the {@link SavedReply} to save
+     * Reset all tables in the database. Used for the developer screen.
      */
-    public void saveReply(SavedReply saved) {
-        try {
-            helper.savedDao.create(saved);
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error saving reply", e);
-        }
-
-        synchronized (savedRepliesLock) {
-            savedReplies.add(saved);
-            savedRepliesIds.add(saved.no);
-        }
-    }
-
-    /**
-     * Searches a saved reply. This is done through caching members, no database lookups.
-     * Threadsafe.
-     *
-     * @param board board for the reply to search
-     * @param no    no for the reply to search
-     * @return A {@link SavedReply} that matches {@code board} and {@code no}, or {@code null}
-     */
-    public SavedReply getSavedReply(String board, int no) {
-        synchronized (savedRepliesLock) {
-            if (savedRepliesIds.contains(no)) {
-                for (SavedReply r : savedReplies) {
-                    if (r.no == no && r.board.equals(board)) {
-                        return r;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Searches if a saved reply exists. This is done through caching members, no database lookups.
-     * Threadsafe.
-     *
-     * @param board board for the reply to search
-     * @param no    no for the reply to search
-     * @return true if a {@link SavedReply} matched {@code board} and {@code no}, {@code false} otherwise
-     */
-    public boolean isSavedReply(String board, int no) {
-        return getSavedReply(board, no) != null;
-    }
-
-    /**
-     * Adds a {@link Pin} to the pin table.
-     *
-     * @param pin Pin to save
-     */
-    public void addPin(Pin pin) {
-        try {
-            helper.loadableDao.create(pin.loadable);
-            helper.pinDao.create(pin);
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error adding pin to db", e);
-        }
-    }
-
-    /**
-     * Deletes a {@link Pin} from the pin table.
-     *
-     * @param pin Pin to delete
-     */
-    public void removePin(Pin pin) {
-        try {
-            helper.pinDao.delete(pin);
-            helper.loadableDao.delete(pin.loadable);
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error removing pin from db", e);
-        }
-    }
-
-    /**
-     * Updates a {@link Pin} in the pin table.
-     *
-     * @param pin Pin to update
-     */
-    public void updatePin(Pin pin) {
-        try {
-            helper.pinDao.update(pin);
-            helper.loadableDao.update(pin.loadable);
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error updating pin in db", e);
-        }
-    }
-
-    /**
-     * Updates all {@link Pin}s in the list to the pin table.
-     *
-     * @param pins Pins to update
-     */
-    public void updatePins(final List<Pin> pins) {
-        try {
-            callInTransaction(helper.getConnectionSource(), new Callable<Void>() {
-                @Override
-                public Void call() throws SQLException {
-                    for (Pin pin : pins) {
-                        helper.pinDao.update(pin);
-                    }
-
-                    for (Pin pin : pins) {
-                        helper.loadableDao.update(pin.loadable);
-                    }
-
-                    return null;
-                }
-            });
-        } catch (Exception e) {
-            Logger.e(TAG, "Error updating pins in db", e);
-        }
-    }
-
-    /**
-     * Get a list of {@link Pin}s from the pin table.
-     *
-     * @return List of Pins
-     */
-    public List<Pin> getPinned() {
-        List<Pin> list = null;
-        try {
-            list = helper.pinDao.queryForAll();
-            for (Pin p : list) {
-                helper.loadableDao.refresh(p.loadable);
-            }
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error getting pins from db", e);
-        }
-
-        return list;
-    }
-
-    /**
-     * Adds or updates a {@link History} to the history table.
-     * Only updates the date if the history is already in the table.
-     *
-     * @param history History to save
-     */
-    public void addHistory(final History history) {
-        backgroundExecutor.submit(new Runnable() {
-            @Override
-            public void run() {
-                addHistoryInternal(history);
-            }
-        });
-    }
-
-    /**
-     * Deletes a {@link History} from the history table.
-     *
-     * @param history History to delete
-     */
-    public void removeHistory(History history) {
-        try {
-            helper.historyDao.delete(history);
-            helper.loadableDao.delete(history.loadable);
-            historyByLoadable.remove(history.loadable);
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error removing history from db", e);
-        }
-    }
-
-    /**
-     * Clears all history and the referenced loadables from the database.
-     */
-    public void clearHistory() {
-        try {
-            TransactionManager.callInTransaction(helper.getConnectionSource(), new Callable<Void>() {
-                @Override
-                public Void call() throws Exception {
-                    List<History> historyList = getHistory();
-                    for (History history : historyList) {
-                        removeHistory(history);
-                    }
-
-                    return null;
-                }
-            });
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error clearing history", e);
-        }
-    }
-
-    /**
-     * Get a list of {@link History} entries from the history table.
-     *
-     * @return List of History
-     */
-    public List<History> getHistory() {
-        List<History> list = null;
-        try {
-            QueryBuilder<History, Integer> historyQuery = helper.historyDao.queryBuilder();
-            list = historyQuery.orderBy("date", false).query();
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error getting history from db", e);
-        }
-
-        return list;
-    }
-
-    public void addOrUpdateFilter(Filter filter) {
-        try {
-            helper.filterDao.createOrUpdate(filter);
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error adding filter to db", e);
-        }
-    }
-
-    public void removeFilter(Filter filter) {
-        try {
-            helper.filterDao.delete(filter);
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error removing filter from db", e);
-        }
-    }
-
-    public List<Filter> getFilters() {
-        List<Filter> list = null;
-        try {
-            list = helper.filterDao.queryForAll();
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error getting filters from db", e);
-        }
-
-        return list;
+    public void reset() {
+        helper.reset();
+        initialize();
     }
 
     /**
@@ -431,40 +240,6 @@ public class DatabaseManager {
         return o;
     }
 
-    /**
-     * Reset all tables in the database. Used for the developer screen.
-     */
-    public void reset() {
-        helper.reset();
-        initialize();
-    }
-
-    private void initialize() {
-        loadSavedReplies();
-        loadThreadHides();
-        loadHistory();
-    }
-
-    /**
-     * Threadsafe.
-     */
-    private void loadSavedReplies() {
-        try {
-            trimTable(helper.savedDao, "savedreply", SAVED_REPLY_TRIM_TRIGGER, SAVED_REPLY_TRIM_COUNT);
-
-            synchronized (savedRepliesLock) {
-                savedReplies.clear();
-                savedReplies.addAll(helper.savedDao.queryForAll());
-                savedRepliesIds.clear();
-                for (SavedReply reply : savedReplies) {
-                    savedRepliesIds.add(reply.no);
-                }
-            }
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error loading saved replies", e);
-        }
-    }
-
     private void loadThreadHides() {
         try {
             trimTable(helper.threadHideDao, "threadhide", THREAD_HIDE_TRIM_TRIGGER, THREAD_HIDE_TRIM_COUNT);
@@ -480,48 +255,6 @@ public class DatabaseManager {
         }
     }
 
-    private void loadHistory() {
-        synchronized (historyLock) {
-            try {
-                trimTable(helper.historyDao, "history", HISTORY_TRIM_TRIGGER, HISTORY_TRIM_COUNT);
-
-                historyByLoadable.clear();
-                List<History> historyList = helper.historyDao.queryForAll();
-                for (History history : historyList) {
-                    historyByLoadable.put(history.loadable, history);
-                }
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
-    private void addHistoryInternal(final History history) {
-        try {
-            TransactionManager.callInTransaction(helper.getConnectionSource(), new Callable<Void>() {
-                @Override
-                public Void call() throws Exception {
-                    synchronized (historyLock) {
-                        History existingHistory = historyByLoadable.get(history.loadable);
-                        if (existingHistory != null) {
-                            existingHistory.date = System.currentTimeMillis();
-                            helper.historyDao.update(existingHistory);
-                        } else {
-                            history.date = System.currentTimeMillis();
-                            helper.loadableDao.create(history.loadable);
-                            helper.historyDao.create(history);
-                            historyByLoadable.put(history.loadable, history);
-                        }
-                    }
-
-                    return null;
-                }
-            });
-        } catch (SQLException e) {
-            Logger.e(TAG, "Error adding history", e);
-        }
-    }
-
     /**
      * Trim a table with the specified trigger and trim count.
      *
@@ -530,15 +263,58 @@ public class DatabaseManager {
      * @param trigger Trim if there are more rows than {@code trigger}.
      * @param trim    Count of rows to trim.
      */
-    private void trimTable(Dao dao, String table, long trigger, long trim) {
+    /*package*/ void trimTable(Dao dao, String table, long trigger, long trim) {
         try {
             long count = dao.countOf();
             if (count > trigger) {
+                long start = Time.startTiming();
                 dao.executeRaw("DELETE FROM " + table + " WHERE id IN (SELECT id FROM " + table + " ORDER BY id ASC LIMIT ?)", String.valueOf(trim));
-                Logger.i(TAG, "Trimmed " + table + " from " + count + " to " + dao.countOf() + " rows");
+                Time.endTiming("Trimmed " + table + " from " + count + " to " + dao.countOf() + " rows", start);
             }
         } catch (SQLException e) {
             Logger.e(TAG, "Error trimming table " + table, e);
         }
+    }
+
+    public <T> void runTask(final Callable<T> taskCallable) {
+        runTask(taskCallable, null);
+    }
+
+    public <T> void runTask(final Callable<T> taskCallable, final TaskResult<T> taskResult) {
+        executeTask(taskCallable, taskResult);
+    }
+
+    public <T> T runTaskSync(final Callable<T> taskCallable) {
+        try {
+            return executeTask(taskCallable, null).get();
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private <T> Future<T> executeTask(final Callable<T> taskCallable, final TaskResult<T> taskResult) {
+        return backgroundExecutor.submit(new Callable<T>() {
+            @Override
+            public T call() {
+                try {
+                    final T result = TransactionManager.callInTransaction(helper.getConnectionSource(), taskCallable);
+                    if (taskResult != null) {
+                        new Handler(Looper.getMainLooper()).post(new Runnable() {
+                            @Override
+                            public void run() {
+                                taskResult.onComplete(result);
+                            }
+                        });
+                    }
+                    return result;
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+    }
+
+    public interface TaskResult<T> {
+        void onComplete(T result);
     }
 }

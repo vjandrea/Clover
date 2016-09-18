@@ -18,24 +18,21 @@
 package org.floens.chan.ui.controller;
 
 import android.content.Context;
-import android.content.res.Configuration;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
 
 import org.floens.chan.R;
 import org.floens.chan.controller.Controller;
-import org.floens.chan.controller.ControllerLogic;
 import org.floens.chan.controller.ControllerTransition;
-import org.floens.chan.controller.NavigationController;
-import org.floens.chan.utils.AndroidUtils;
+import org.floens.chan.controller.transition.PopControllerTransition;
+import org.floens.chan.controller.transition.PushControllerTransition;
+import org.floens.chan.ui.layout.SplitNavigationControllerLayout;
 
-import static org.floens.chan.utils.AndroidUtils.dp;
 import static org.floens.chan.utils.AndroidUtils.getAttrColor;
 
-public class SplitNavigationController extends NavigationController implements AndroidUtils.OnMeasuredCallback {
+public class SplitNavigationController extends Controller implements DoubleNavigationController {
     public Controller leftController;
     public Controller rightController;
 
@@ -55,59 +52,90 @@ public class SplitNavigationController extends NavigationController implements A
     public void onCreate() {
         super.onCreate();
 
-        LinearLayout wrap = new LinearLayout(context);
-        view = wrap;
+        doubleNavigationController = this;
+
+        SplitNavigationControllerLayout container = new SplitNavigationControllerLayout(context);
+        view = container;
 
         leftControllerView = new FrameLayout(context);
-        wrap.addView(leftControllerView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT));
 
         dividerView = new View(context);
         dividerView.setBackgroundColor(getAttrColor(context, R.attr.divider_split_color));
-        wrap.addView(dividerView, new LinearLayout.LayoutParams(dp(1), LinearLayout.LayoutParams.MATCH_PARENT));
 
         rightControllerView = new FrameLayout(context);
-        wrap.addView(rightControllerView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+
+        container.setLeftView(leftControllerView);
+        container.setRightView(rightControllerView);
+        container.setDivider(dividerView);
+        container.build();
 
         setRightController(null);
-
-        AndroidUtils.waitForMeasure(view, this);
     }
 
     @Override
-    public void onDestroy() {
-        super.onDestroy();
-
-        if (leftController != null) {
-            leftController.onDestroy();
-        }
-        if (rightController != null) {
-            rightController.onDestroy();
-        }
-    }
-
     public void setEmptyView(ViewGroup emptyView) {
         this.emptyView = emptyView;
     }
 
+    @Override
     public void setLeftController(Controller leftController) {
-        leftController.navigationController = this;
-        ControllerLogic.transition(this.leftController, leftController, true, true, leftControllerView);
+        if (this.leftController != null) {
+            this.leftController.onHide();
+            removeChildController(this.leftController);
+        }
+
         this.leftController = leftController;
+
+        if (leftController != null) {
+            addChildController(leftController);
+            leftController.attachToParentView(leftControllerView);
+            leftController.onShow();
+        }
     }
 
+    @Override
     public void setRightController(Controller rightController) {
-        if (rightController != null) {
-            rightController.navigationController = this;
+        if (this.rightController != null) {
+            this.rightController.onHide();
+            removeChildController(this.rightController);
         } else {
             rightControllerView.removeAllViews();
         }
 
-        ControllerLogic.transition(this.rightController, rightController, true, true, rightControllerView);
         this.rightController = rightController;
 
-        if (rightController == null) {
+        if (rightController != null) {
+            addChildController(rightController);
+            rightController.attachToParentView(rightControllerView);
+            rightController.onShow();
+        } else {
             rightControllerView.addView(emptyView);
         }
+    }
+
+    @Override
+    public Controller getLeftController() {
+        return leftController;
+    }
+
+    @Override
+    public Controller getRightController() {
+        return rightController;
+    }
+
+    @Override
+    public void switchToController(boolean leftController) {
+        // both are always visible
+    }
+
+    @Override
+    public boolean pushController(final Controller to) {
+        return pushController(to, true);
+    }
+
+    @Override
+    public boolean pushController(final Controller to, boolean animated) {
+        return pushController(to, animated ? new PushControllerTransition() : null);
     }
 
     @Override
@@ -126,10 +154,20 @@ public class SplitNavigationController extends NavigationController implements A
     }
 
     @Override
+    public boolean popController() {
+        return popController(true);
+    }
+
+    @Override
+    public boolean popController(boolean animated) {
+        return popController(animated ? new PopControllerTransition() : null);
+    }
+
+    @Override
     public boolean popController(ControllerTransition controllerTransition) {
         if (popup != null) {
-            if (popupChild.getControllerList().size() == 1) {
-                presentedController.stopPresenting();
+            if (popupChild.childControllers.size() == 1) {
+                presentingThisController.stopPresenting();
                 popup = null;
                 popupChild = null;
             } else {
@@ -143,7 +181,7 @@ public class SplitNavigationController extends NavigationController implements A
 
     public void popAll() {
         if (popup != null) {
-            presentedController.stopPresenting();
+            presentingThisController.stopPresenting();
             popup = null;
             popupChild = null;
         }
@@ -164,24 +202,5 @@ public class SplitNavigationController extends NavigationController implements A
         return (rightController != null && rightController.dispatchKeyEvent(event)) ||
                 (leftController != null && leftController.dispatchKeyEvent(event)) ||
                 super.dispatchKeyEvent(event);
-    }
-
-    @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-
-        AndroidUtils.waitForMeasure(view, this);
-    }
-
-    @Override
-    public boolean onMeasured(View view) {
-        int width = Math.max(dp(300), (int) (view.getWidth() * 0.35));
-        if (leftControllerView.getWidth() != width) {
-            leftControllerView.getLayoutParams().width = width;
-            leftControllerView.requestLayout();
-            return true;
-        } else {
-            return false;
-        }
     }
 }

@@ -53,6 +53,7 @@ import java.util.List;
 import static org.floens.chan.utils.AndroidUtils.ROBOTO_MEDIUM;
 import static org.floens.chan.utils.AndroidUtils.dp;
 import static org.floens.chan.utils.AndroidUtils.getAttrColor;
+import static org.floens.chan.utils.AndroidUtils.getDimen;
 
 /**
  * A layout that wraps around a {@link RecyclerView} and a {@link ReplyLayout} to manage showing and replying to posts.
@@ -69,7 +70,7 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
     private ThreadListLayoutPresenterCallback callback;
     private ThreadListLayoutCallback threadListLayoutCallback;
     private boolean replyOpen;
-    private PostCellInterface.PostViewMode postViewMode;
+    private ChanSettings.PostViewMode postViewMode;
     private int spanCount = 2;
     private int background;
     private boolean searchOpen;
@@ -106,22 +107,13 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
             public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
                 // onScrolled can be called after cleanup()
                 if (showingThread != null) {
-                    int index = 0;
-                    int top = 0;
-                    if (recyclerView.getLayoutManager().getChildCount() > 0) {
-                        View topChild = recyclerView.getLayoutManager().getChildAt(0);
+                    int[] indexTop = getIndexAndTop();
 
-                        index = ((RecyclerView.LayoutParams) topChild.getLayoutParams()).getViewLayoutPosition();
-
-                        RecyclerView.LayoutParams params = (RecyclerView.LayoutParams) topChild.getLayoutParams();
-                        top = layoutManager.getDecoratedTop(topChild) - params.topMargin - recyclerView.getPaddingTop();
-                    }
-
-                    showingThread.loadable.listViewIndex = index;
-                    showingThread.loadable.listViewTop = top;
+                    showingThread.loadable.setListViewIndex(indexTop[0]);
+                    showingThread.loadable.setListViewTop(indexTop[1]);
 
                     int last = getCompleteBottomAdapterPosition();
-                    if (last == postAdapter.getUnfilteredDisplaySize() - 1 && last > lastPostCount) {
+                    if (last == postAdapter.getItemCount() - 1 && last > lastPostCount) {
                         lastPostCount = last;
                         ThreadListLayout.this.callback.onListScrolledToBottom();
                     }
@@ -141,14 +133,19 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
 
         int cardWidth = getResources().getDimensionPixelSize(R.dimen.grid_card_width);
-        spanCount = Math.max(1, Math.round(getMeasuredWidth() / cardWidth));
+        int gridCountSetting = ChanSettings.boardGridSpanCount.get();
+        if (gridCountSetting > 0) {
+            spanCount = gridCountSetting;
+        } else {
+            spanCount = Math.max(1, Math.round(getMeasuredWidth() / cardWidth));
+        }
 
-        if (postViewMode == PostCellInterface.PostViewMode.CARD) {
+        if (postViewMode == ChanSettings.PostViewMode.CARD) {
             ((GridLayoutManager) layoutManager).setSpanCount(spanCount);
         }
     }
 
-    public void setPostViewMode(PostCellInterface.PostViewMode postViewMode) {
+    public void setPostViewMode(ChanSettings.PostViewMode postViewMode) {
         if (this.postViewMode != postViewMode) {
             this.postViewMode = postViewMode;
 
@@ -170,9 +167,8 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
                     break;
                 case CARD:
                     GridLayoutManager gridLayoutManager = new GridLayoutManager(null, spanCount, GridLayoutManager.VERTICAL, false);
-                    // The cards have a 4dp padding, this way there is always 8dp between the edges
-                    recyclerViewTopPadding = dp(4);
-                    recyclerView.setPadding(dp(4), recyclerViewTopPadding + toolbarHeight(), dp(4), dp(4));
+                    recyclerViewTopPadding = dp(1);
+                    recyclerView.setPadding(dp(1), recyclerViewTopPadding + toolbarHeight(), dp(1), dp(1));
                     recyclerView.setLayoutManager(gridLayoutManager);
                     layoutManager = gridLayoutManager;
 
@@ -248,8 +244,8 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
         if (showingThread != null && replyOpen != open) {
             this.replyOpen = open;
             int height = AnimationUtils.animateHeight(reply, replyOpen, getWidth(), 500);
+            reply.onOpen(open);
             if (open) {
-                reply.focusComment();
                 recyclerView.setPadding(recyclerView.getPaddingLeft(), recyclerViewTopPadding + height, recyclerView.getPaddingRight(), recyclerView.getPaddingBottom());
             } else {
                 AndroidUtils.hideKeyboard(reply);
@@ -316,7 +312,7 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
             case CARD:
                 if (getTopAdapterPosition() == 0) {
                     View top = layoutManager.findViewByPosition(0);
-                    return top.getTop() != dp(8) + toolbarHeight(); // 4dp for the cards, 4dp for this layout
+                    return top.getTop() != getDimen(getContext(), R.dimen.grid_card_margin) + dp(1) + toolbarHeight();
                 }
                 break;
         }
@@ -371,6 +367,15 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
                 recyclerView.smoothScrollToPosition(bottom);
             } else {
                 recyclerView.scrollToPosition(bottom);
+                // No animation means no animation, wait for the layout to finish and skip all animations
+                final RecyclerView.ItemAnimator itemAnimator = recyclerView.getItemAnimator();
+                AndroidUtils.waitForLayout(recyclerView, new AndroidUtils.OnMeasuredCallback() {
+                    @Override
+                    public boolean onMeasured(View view) {
+                        itemAnimator.endAnimations();
+                        return true;
+                    }
+                });
             }
         } else {
             int scrollPosition = postAdapter.getScrollPosition(displayPosition);
@@ -384,6 +389,15 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
                 recyclerView.smoothScrollToPosition(scrollPosition);
             } else {
                 recyclerView.scrollToPosition(scrollPosition);
+                // No animation means no animation, wait for the layout to finish and skip all animations
+                final RecyclerView.ItemAnimator itemAnimator = recyclerView.getItemAnimator();
+                AndroidUtils.waitForLayout(recyclerView, new AndroidUtils.OnMeasuredCallback() {
+                    @Override
+                    public boolean onMeasured(View view) {
+                        itemAnimator.endAnimations();
+                        return true;
+                    }
+                });
             }
         }
     }
@@ -398,6 +412,10 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
 
     public void highlightPostTripcode(String tripcode) {
         postAdapter.highlightPostTripcode(tripcode);
+    }
+
+    public void selectPost(int post) {
+        postAdapter.selectPost(post);
     }
 
     @Override
@@ -420,8 +438,23 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
         return showingThread;
     }
 
+    public int[] getIndexAndTop() {
+        int index = 0;
+        int top = 0;
+        if (recyclerView.getLayoutManager().getChildCount() > 0) {
+            View topChild = recyclerView.getLayoutManager().getChildAt(0);
+
+            index = ((RecyclerView.LayoutParams) topChild.getLayoutParams()).getViewLayoutPosition();
+
+            RecyclerView.LayoutParams params = (RecyclerView.LayoutParams) topChild.getLayoutParams();
+            top = layoutManager.getDecoratedTop(topChild) - params.topMargin - recyclerView.getPaddingTop();
+        }
+
+        return new int[]{index, top};
+    }
+
     private void attachToolbarScroll(boolean attach) {
-        if (!AndroidUtils.isTablet(getContext())) {
+        if (threadListLayoutCallback.shouldToolbarCollapse()) {
             Toolbar toolbar = threadListLayoutCallback.getToolbar();
             if (attach) {
                 toolbar.attachRecyclerViewScrollStateListener(recyclerView);
@@ -504,5 +537,7 @@ public class ThreadListLayout extends FrameLayout implements ReplyLayout.ReplyLa
         void replyLayoutOpen(boolean open);
 
         Toolbar getToolbar();
+
+        boolean shouldToolbarCollapse();
     }
 }

@@ -18,11 +18,12 @@
 package org.floens.chan.ui.controller;
 
 import android.content.Context;
-import android.view.ViewGroup;
 
 import org.floens.chan.R;
 import org.floens.chan.controller.Controller;
 import org.floens.chan.controller.ControllerTransition;
+import org.floens.chan.controller.ui.NavigationControllerContainerLayout;
+import org.floens.chan.core.settings.ChanSettings;
 import org.floens.chan.ui.theme.ThemeHelper;
 import org.floens.chan.ui.toolbar.Toolbar;
 
@@ -36,10 +37,23 @@ public class StyledToolbarNavigationController extends ToolbarNavigationControll
         super.onCreate();
 
         view = inflateRes(R.layout.controller_navigation_toolbar);
-        container = (ViewGroup) view.findViewById(R.id.container);
+        container = (NavigationControllerContainerLayout) view.findViewById(R.id.container);
+        container.setNavigationController(this);
+        container.setSwipeEnabled(ChanSettings.controllerSwipeable.get());
         toolbar = (Toolbar) view.findViewById(R.id.toolbar);
         toolbar.setBackgroundColor(ThemeHelper.getInstance().getTheme().primaryColor.color);
         toolbar.setCallback(this);
+    }
+
+    @Override
+    public boolean popController(ControllerTransition controllerTransition) {
+        return !toolbar.isTransitioning() && super.popController(controllerTransition);
+
+    }
+
+    @Override
+    public boolean pushController(Controller to, ControllerTransition controllerTransition) {
+        return !toolbar.isTransitioning() && super.pushController(to, controllerTransition);
     }
 
     @Override
@@ -55,16 +69,27 @@ public class StyledToolbarNavigationController extends ToolbarNavigationControll
     }
 
     @Override
+    public void endSwipeTransition(Controller from, Controller to, boolean finish) {
+        super.endSwipeTransition(from, to, finish);
+
+        if (finish) {
+            DrawerController drawerController = getDrawerController();
+            if (drawerController != null) {
+                drawerController.setDrawerEnabled(to.navigationItem.hasDrawer);
+            }
+        }
+    }
+
+    @Override
     public boolean onBack() {
         if (super.onBack()) {
             return true;
-        } else if (parentController instanceof PopupController && controllerList.size() == 1) {
+        } else if (parentController instanceof PopupController && childControllers.size() == 1) {
             ((PopupController) parentController).dismiss();
             return true;
-        } else if (navigationController instanceof SplitNavigationController && controllerList.size() == 1) {
-            SplitNavigationController splitNavigationController = (SplitNavigationController) navigationController;
-            if (splitNavigationController.rightController == this) {
-                splitNavigationController.setRightController(null);
+        } else if (doubleNavigationController != null && childControllers.size() == 1) {
+            if (doubleNavigationController.getRightController() == this) {
+                doubleNavigationController.setRightController(null);
                 return true;
             } else {
                 return false;
@@ -85,10 +110,10 @@ public class StyledToolbarNavigationController extends ToolbarNavigationControll
     private DrawerController getDrawerController() {
         if (parentController instanceof DrawerController) {
             return (DrawerController) parentController;
-        } else if (navigationController instanceof SplitNavigationController) {
-            SplitNavigationController splitNavigationController = (SplitNavigationController) navigationController;
-            if (splitNavigationController.parentController instanceof DrawerController) {
-                return (DrawerController) splitNavigationController.parentController;
+        } else if (doubleNavigationController != null) {
+            Controller doubleNav = (Controller) doubleNavigationController;
+            if (doubleNav.parentController instanceof DrawerController) {
+                return (DrawerController) doubleNav.parentController;
             }
         }
         return null;
